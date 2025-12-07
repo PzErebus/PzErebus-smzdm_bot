@@ -9,30 +9,50 @@
 
 ## 更新日志
 
-- 2022-12-08, 签到失败，浏览器端签到需要滑动验证码认证
-- 2023-01-11, 更改`User-Agent`为`iPhone`后可`bypass`滑块认证
-- 2023-01-14, 登录认证失败, 签到失效
-- 2023-02-18, 通过安卓端验证登录，感谢 [jzksnsjswkw/smzdm-app](https://github.com/jzksnsjswkw/smzdm-app) 的思路. 旧版代码查看 [old](https://github.com/Chasing66/smzdm_bot/tree/old) 分支
-- 2023-02-25, 新增`all_reward` 和`extra_reward`两个接口，本地支持多用户运行
-- 2023-02-27, 修复本地 docker-compose 运行问题; 本地 docker-compose 支持多账号运行
-- 2023-03-01, 支持青龙面板且支持多账号
-- 2023-03-01, 仅需要`ANDROID_COOKIE`和`SK`两个变量，自动生成`USER_AGENT`和`TOKEN`, 引入随机休眠，减小被封概率
-- 2023-03-02, 新增每日抽奖，参考 hex-ci 的[思路](https://github.com/hex-ci/smzdm_script/blob/main/smzdm_lottery.js)
-- 2023-04-06, 新增企业微信BOT-WEBHOOK通知推送方式，仅需要`ANDROID_COOKIE`一个变量, `SK`改为可选变量. 如果能够通过抓包抓到，最好填上.
+- 2024-xx-xx, 重构项目，使用 src layout 和 uv 管理依赖
 - 2023-04-23，更新抽奖功能
+- 2023-04-06, 新增企业微信BOT-WEBHOOK通知推送方式，仅需要`ANDROID_COOKIE`一个变量, `SK`改为可选变量
+- 2023-03-02, 新增每日抽奖
+- 2023-03-01, 支持青龙面板且支持多账号
+- 2023-02-25, 新增`all_reward` 和`extra_reward`两个接口，本地支持多用户运行
+- 2023-02-18, 通过安卓端验证登录
 
 ## 1. 实现功能
 
 - 每日签到, 额外奖励，随机奖励
 - 多种运行方式: GitHub Action, 本地运行，docker， 青龙面板
-- 多种通知方式: `pushplus`, `server酱`,`企业微信bot-webhook`, `telegram bot`(支持自定义反代`Telegram Bot API`. [搭建教程](https://anerg.com/2022/07/25/reverse-proxy-telegram-bot-api-using-cloudflare-worker.html))
+- 多种通知方式: `pushplus`, `server酱`,`企业微信bot-webhook`, `telegram bot`
 - 支持多账号(需配置`config.toml`)
 
-## 2. 配置
+## 2. 项目结构
+
+```
+smzdm_bot/
+├── src/
+│   └── smzdm_bot/
+│       ├── __init__.py
+│       ├── cli.py           # 命令行入口
+│       ├── main.py          # 主逻辑
+│       ├── scheduler.py     # 定时任务
+│       ├── config/
+│       │   └── config_example.toml
+│       ├── notify/
+│       │   └── notify.py    # 通知模块
+│       └── utils/
+│           ├── file_helper.py
+│           ├── smzdm_bot.py
+│           └── smzdm_tasks.py
+├── pyproject.toml           # 项目配置 (uv/pip)
+├── Dockerfile
+├── docker-compose.yml
+└── smzdm_ql.py             # 青龙面板脚本
+```
+
+## 3. 配置
 
 支持两种读取配置的方法，从`环境变量`或者`config.toml`中读取
 
-### 2.1 从环境变量中读取配置
+### 3.1 从环境变量中读取配置
 
 ```conf
 # Cookie
@@ -54,9 +74,9 @@ SCH_HOUR=
 SCH_MINUTE=
 ```
 
-### 2.2 从`config.toml`中读取
+### 3.2 从`config.toml`中读取
 
-参考模板 [app/config/config_example.toml](https://github.com/Chasing66/smzdm_bot/blob/main/app/config/config_example.toml)
+参考模板 [src/smzdm_bot/config/config_example.toml](https://github.com/Chasing66/smzdm_bot/blob/main/src/smzdm_bot/config/config_example.toml)
 
 ```toml
 [user.A]
@@ -78,9 +98,9 @@ TG_USER_ID = ""
 TG_BOT_API = ""
 ```
 
-## 3. 使用
+## 4. 使用
 
-### 3.1 青龙面板
+### 4.1 青龙面板
 
 ```
 ql repo https://github.com/Chasing66/smzdm_bot.git "smzdm_ql.py"
@@ -88,48 +108,91 @@ ql repo https://github.com/Chasing66/smzdm_bot.git "smzdm_ql.py"
 
 默认情况下从环境变量读取配置,仅支持单用户.
 
-如果需要支持多用户，推荐使用`config.toml`, 配置参考 [2.2 从`config.toml`中读取](#22-从configtoml中读取).
-配置完成后, 拷贝`config.toml`到青龙容器内的`/ql/data/repo/Chasing66_smzdm_bot/app/config`
+如果需要支持多用户，推荐使用`config.toml`, 配置参考 [3.2 从`config.toml`中读取](#32-从configtoml中读取).
+配置完成后, 拷贝`config.toml`到青龙容器内的`/ql/data/repo/Chasing66_smzdm_bot/src/smzdm_bot/config`
 
 ```
-docker cp config.toml <你的青龙容器名称>:/ql/data/repo/Chasing66_smzdm_bot/app/config
+docker cp config.toml <你的青龙容器名称>:/ql/data/repo/Chasing66_smzdm_bot/src/smzdm_bot/config
 ```
 
-### 3.2 本地直接运行
+### 4.2 本地直接运行 (推荐使用 uv)
 
-克隆本项目到本地, 按照需求配置，配置参考 [2.2 从`config.toml`中读取](#22-从configtoml中读取)
+克隆本项目到本地, 按照需求配置
+
+**使用 uv (推荐)**
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-cd app
-pip install -r requirements.txt
-python main.py
+# 安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 克隆并安装
+git clone https://github.com/Chasing66/smzdm_bot.git
+cd smzdm_bot
+uv sync
+
+# 配置
+cp src/smzdm_bot/config/config_example.toml src/smzdm_bot/config/config.toml
+# 编辑 config.toml 填入你的配置
+
+# 运行一次
+uv run smzdm-bot
+
+# 或者运行定时任务
+uv run smzdm-scheduler
 ```
 
-### 3.3 本地 docker-compose 运行
+**使用 pip**
 
-配置参考[2.2 从`config.toml`中读取](#22-从configtoml中读取)
+```bash
+git clone https://github.com/Chasing66/smzdm_bot.git
+cd smzdm_bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 
-修改 [docker-compose.yaml](https://github.com/Chasing66/smzdm_bot/blob/main/docker-compose.yml), 将`app/config/config.toml`mout 到容器内`/smzdm_bot/config/config.toml`
+# 配置
+cp src/smzdm_bot/config/config_example.toml src/smzdm_bot/config/config.toml
+# 编辑 config.toml
+
+# 运行
+smzdm-bot
+```
+
+### 4.3 本地 docker-compose 运行
+
+配置参考 [3.2 从`config.toml`中读取](#32-从configtoml中读取)
+
+**使用环境变量**
+
+创建 `.env` 文件:
+
+```env
+ANDROID_COOKIE=your_cookie_here
+SK=your_sk_here
+PUSH_PLUS_TOKEN=your_token
+```
+
+运行:
+
+```bash
+docker-compose up -d
+```
+
+**使用 config.toml**
+
+修改 `docker-compose.yml`, 取消 volumes 注释:
 
 ```yaml
-version: "3.9"
 services:
   smzdm_bot:
     image: enwaiax/smzdm_bot
     container_name: smzdm_bot
     restart: on-failure
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "1"
     volumes:
-      - ./app/config/config.toml:/smzdm_bot/config/config.toml
+      - ./config.toml:/smzdm_bot/config/config.toml
 ```
 
-### 3.4 Git Action 运行
+### 4.4 GitHub Action 运行
 
 > GitHub Action 禁止对于 Action 资源的滥用，请尽可能使用其他方式
 
@@ -144,11 +207,11 @@ schedule:
   - cron: "30 1 * * *"
 ```
 
-3. 配置参考 [2.1.1 从环境变量中读取配置](#21-从环境变量中读取配置)
+3. 在仓库 Settings -> Secrets 中添加环境变量
 
-## 4. 其它
+## 5. 其它
 
-### 4.1 手机抓包
+### 5.1 手机抓包
 
 > 抓包有一定门槛，请自行尝试! 如果实在解决不了，请我喝瓶可乐可以帮忙
 
@@ -161,6 +224,6 @@ schedule:
 5. 将复制的 curl 命令转换为 python 格式，[方法](https://curlconverter.com/)
 6. 填入转换后的`Cookies`和`sk`. `Cookies`在`headers`里，`sk`在`data`里, `sk`是可选项
 
-## 5. Stargazers over time
+## 6. Stargazers over time
 
 [![Stargazers over time](https://starchart.cc/Chasing66/smzdm_bot.svg)](https://starchart.cc/Chasing66/smzdm_bot)
