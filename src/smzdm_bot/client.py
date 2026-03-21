@@ -18,8 +18,8 @@ from smzdm_bot.exceptions import APIError
 # 常量
 SIGN_KEY = "apr1$AwP!wRRT$gJ/q.X24poeBInlUJC"
 SK_KEY = "geZm53XAspb02exN"  # DES 加密密钥
-DEFAULT_VERSION = "10.4.26"
-DEFAULT_VERSION_CODE = "866"
+DEFAULT_VERSION = "11.1.63"
+DEFAULT_VERSION_CODE = "11163"
 
 
 def parse_cookies(cookie_str: str) -> dict[str, str]:

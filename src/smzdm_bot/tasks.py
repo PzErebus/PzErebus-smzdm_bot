@@ -149,16 +149,33 @@ class TaskRunner:
         try:
             data = self.client.post("/task/list_v2")
             rows = data.get("data", {}).get("rows", [])
-            if not rows or not rows[0]:
+            if not rows:
                 logger.info("无任务活动")
                 return 0
 
-            activity = rows[0].get("cell_data", {}).get("activity_task", {})
-            task_groups = activity.get("accumulate_list", {}).get("task_list_v2", [])
+            first_row = rows[0]
+
+            if isinstance(first_row, list):
+                return 0
+
+            cell_data = first_row.get("cell_data", {})
+            activity = cell_data.get("activity_task", {})
+            accumulate_list = activity.get("accumulate_list", {})
+
+            if isinstance(accumulate_list, list):
+                task_groups = accumulate_list
+            else:
+                task_groups = accumulate_list.get("task_list_v2", [])
 
             completed = 0
             for group in task_groups:
-                for task in group.get("task_list", []):
+                if isinstance(group, dict):
+                    tasks_list = group.get("task_list", [])
+                elif isinstance(group, list):
+                    tasks_list = group
+                else:
+                    continue
+                for task in tasks_list:
                     completed += self._process_task(task)
 
             logger.info(f"完成任务: {completed}")
@@ -172,10 +189,15 @@ class TaskRunner:
 
     def _process_task(self, task: dict) -> int:
         """处理单个任务，返回完成数量（0或1）。"""
+        if not isinstance(task, dict):
+            return 0
+
         status = int(task.get("task_status", 0))
         task_id = task.get("task_id", "")
         name = task.get("task_name", "")
-        task_type = task.get("task_redirect_url", {}).get("link_type", "")
+
+        redirect = task.get("task_redirect_url", {})
+        task_type = redirect.get("link_type", "") if isinstance(redirect, dict) else ""
         event_type = task.get("task_event_type", "")
 
         # 未完成 (status=2)
@@ -187,10 +209,10 @@ class TaskRunner:
             if task_type in ("faxian", "haojia", "article", "yuanchuang"):
                 task_done = self._do_view_task(task)
             # 关注任务
-            elif (
-                event_type in ("interactive.follow.user", "interactive.follow.tag")
-                or task_type in ("guanzhu", "lanmu")
-            ):
+            elif event_type in (
+                "interactive.follow.user",
+                "interactive.follow.tag",
+            ) or task_type in ("guanzhu", "lanmu"):
                 task_done = self._do_follow_task(task)
             else:
                 logger.debug(f"跳过: {task_type}")
@@ -213,6 +235,7 @@ class TaskRunner:
     def _do_view_task(self, task: dict) -> bool:
         """执行浏览任务。"""
         redirect = task.get("task_redirect_url", {})
+        redirect = redirect if isinstance(redirect, dict) else {}
         article_id = redirect.get("link_val") or task.get("article_id")
         task_id = task.get("task_id", "")
         channel_id = task.get("channel_id", "1")
@@ -240,6 +263,7 @@ class TaskRunner:
     def _do_follow_task(self, task: dict) -> bool:
         """执行关注任务（关注后取关）。"""
         redirect = task.get("task_redirect_url", {})
+        redirect = redirect if isinstance(redirect, dict) else {}
         link_type = redirect.get("link_type", "")
         link_val = redirect.get("link_val", "")
 
