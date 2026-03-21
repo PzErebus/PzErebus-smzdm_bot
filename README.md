@@ -1,9 +1,9 @@
 # 什么值得买每日签到脚本
 
 <p>
-    <img src="https://img.shields.io/github/actions/workflow/status/PzErebus/smzdm_bot/checkin.yml?label=CheckIn">
-    <img src="https://img.shields.io/github/actions/workflow/status/PzErebus/smzdm_bot/build.yml?label=Build">
-    <img src="https://img.shields.io/github/license/PzErebus/smzdm_bot">
+    <img src="https://img.shields.io/github/actions/workflow/status/PzErebus/PzErebus-smzdm_bot/checkin.yml?label=CheckIn">
+    <img src="https://img.shields.io/github/actions/workflow/status/PzErebus/PzErebus-smzdm_bot/build.yml?label=Build">
+    <img src="https://img.shields.io/github/license/PzErebus/PzErebus-smzdm_bot">
     <img src="https://img.shields.io/docker/pulls/enwaiax/smzdm_bot">
 </p>
 
@@ -97,7 +97,7 @@ SMZDM_PUSH_PLUS_TOKEN=你的推送Token
 ### 4.1 青龙面板
 
 ```
-ql repo https://github.com/PzErebus/smzdm_bot.git "smzdm_ql.py"
+ql repo https://github.com/PzErebus/PzErebus-smzdm_bot.git "smzdm_ql.py"
 ```
 
 在青龙面板中添加环境变量 `SMZDM_COOKIE`。
@@ -111,8 +111,8 @@ ql repo https://github.com/PzErebus/smzdm_bot.git "smzdm_ql.py"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 克隆并安装
-git clone https://github.com/PzErebus/smzdm_bot.git
-cd smzdm_bot
+git clone https://github.com/PzErebus/PzErebus-smzdm_bot.git
+cd PzErebus-smzdm_bot
 uv sync
 
 # 创建 .env 文件并配置
@@ -128,8 +128,8 @@ uv run smzdm-scheduler
 **使用 pip**
 
 ```bash
-git clone https://github.com/PzErebus/smzdm_bot.git
-cd smzdm_bot
+git clone https://github.com/PzErebus/PzErebus-smzdm_bot.git
+cd PzErebus-smzdm_bot
 python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -166,7 +166,7 @@ docker-compose up -d
 
 > GitHub Action 禁止对于 Action 资源的滥用，请尽可能使用其他方式
 
-1. Fork [此仓库项目](https://github.com/PzErebus/smzdm_bot)，欢迎 `star`~
+1. Fork [此仓库项目](https://github.com/PzErebus/PzErebus-smzdm_bot)，欢迎 `star`~
 2. 修改 `.github/workflows/checkin.yml` 里的 schedule 时间
 3. 在仓库 Settings -> Secrets 中添加环境变量:
    - `SMZDM_COOKIE`: 你的 Cookie
@@ -213,4 +213,4 @@ smzdm-bot --version
 
 ## 7. Stargazers over time
 
-[![Stargazers over time](https://starchart.cc/PzErebus/smzdm_bot.svg)](https://starchart.cc/PzErebus/smzdm_bot)
+[![Stargazers over time](https://starchart.cc/PzErebus/PzErebus-smzdm_bot.svg)](https://starchart.cc/PzErebus/PzErebus-smzdm_bot)

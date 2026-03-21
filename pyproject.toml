@@ -39,8 +39,8 @@ smzdm-bot = "smzdm_bot.cli:cli_entry"
 smzdm-scheduler = "smzdm_bot.cli:scheduler_entry"
 
 [project.urls]
-Homepage = "https://github.com/PzErebus/smzdm_bot"
-Repository = "https://github.com/PzErebus/smzdm_bot"
+Homepage = "https://github.com/PzErebus/PzErebus-smzdm_bot"
+Repository = "https://github.com/PzErebus/PzErebus-smzdm_bot"
 
 [build-system]
 requires = ["hatchling"]
