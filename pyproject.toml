@@ -6,7 +6,7 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
 authors = [
-    { name = "Chasing66", email = "chasing66@163.com" }
+    { name = "PzErebus", email = "PzErebus@users.noreply.github.com" }
 ]
 keywords = ["smzdm", "checkin", "bot"]
 classifiers = [
@@ -39,8 +39,8 @@ smzdm-bot = "smzdm_bot.cli:cli_entry"
 smzdm-scheduler = "smzdm_bot.cli:scheduler_entry"
 
 [project.urls]
-Homepage = "https://github.com/Chasing66/smzdm_bot"
-Repository = "https://github.com/Chasing66/smzdm_bot"
+Homepage = "https://github.com/PzErebus/smzdm_bot"
+Repository = "https://github.com/PzErebus/smzdm_bot"
 
 [build-system]
 requires = ["hatchling"]
