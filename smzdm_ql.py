@@ -18,7 +18,7 @@ def main():
         f"cd {str(repo_dir)}; "
         f"pip3 install -q --root-user-action=ignore --upgrade pip; "
         f"pip3 install -q --root-user-action=ignore -e .; "
-        f"smzdm-bot"
+        f"smzdm-bot run"
     )
 
 
