@@ -1,7 +1,6 @@
-"""Notification module for SMZDM Bot.
+"""通知模块 - 支持多种推送方式。"""
 
-Simple functions to send notifications via various providers.
-"""
+from typing import Callable
 
 import httpx
 from loguru import logger
@@ -11,101 +10,93 @@ from smzdm_bot.config import NotifyConfig
 TIMEOUT = 30.0
 
 
+def _send_request(
+    name: str,
+    url: str,
+    payload: dict | None = None,
+    data: dict | None = None,
+    check_success: Callable[[dict], bool] | None = None,
+) -> bool:
+    """通用请求发送函数。"""
+    try:
+        if payload:
+            resp = httpx.post(url, json=payload, timeout=TIMEOUT)
+        else:
+            resp = httpx.post(url, data=data or {}, timeout=TIMEOUT)
+
+        result = resp.json()
+        if check_success and check_success(result):
+            logger.success(f"✅ {name}: 发送成功")
+            return True
+        logger.warning(f"{name} 发送失败: {resp.text[:100]}")
+    except Exception as e:
+        logger.warning(f"{name} 发送异常: {e}")
+    return False
+
+
 def send_pushplus(token: str, title: str, content: str) -> bool:
-    """Send via PushPlus."""
+    """PushPlus 推送。"""
     if not token:
         return False
-
-    try:
-        resp = httpx.post(
-            "https://www.pushplus.plus/send",
-            json={"token": token, "title": title, "content": content, "template": "html"},
-            timeout=TIMEOUT,
-        )
-        if resp.json().get("code") == 200:
-            logger.success("✅ PushPlus: sent")
-            return True
-        logger.warning(f"PushPlus failed: {resp.text}")
-    except Exception as e:
-        logger.warning(f"PushPlus error: {e}")
-    return False
+    return _send_request(
+        "PushPlus",
+        "https://www.pushplus.plus/send",
+        payload={"token": token, "title": title, "content": content, "template": "html"},
+        check_success=lambda r: r.get("code") == 200,
+    )
 
 
 def send_serverchan(key: str, title: str, content: str) -> bool:
-    """Send via ServerChan."""
+    """Server酱 推送。"""
     if not key:
         return False
-
-    try:
-        resp = httpx.post(
-            f"https://sctapi.ftqq.com/{key}.send",
-            data={"title": title, "desp": content},
-            timeout=TIMEOUT,
-        )
-        if resp.json().get("code") == 0:
-            logger.success("✅ ServerChan: sent")
-            return True
-        logger.warning(f"ServerChan failed: {resp.text}")
-    except Exception as e:
-        logger.warning(f"ServerChan error: {e}")
-    return False
+    return _send_request(
+        "ServerChan",
+        f"https://sctapi.ftqq.com/{key}.send",
+        data={"title": title, "desp": content},
+        check_success=lambda r: r.get("code") == 0,
+    )
 
 
 def send_wecom(webhook: str, title: str, content: str) -> bool:
-    """Send via WeCom Bot."""
+    """企业微信 Bot 推送。"""
     if not webhook:
         return False
-
-    try:
-        resp = httpx.post(
-            webhook,
-            json={"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
-            timeout=TIMEOUT,
-        )
-        if resp.json().get("errcode") == 0:
-            logger.success("✅ WeCom: sent")
-            return True
-        logger.warning(f"WeCom failed: {resp.text}")
-    except Exception as e:
-        logger.warning(f"WeCom error: {e}")
-    return False
+    return _send_request(
+        "WeCom",
+        webhook,
+        payload={"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
+        check_success=lambda r: r.get("errcode") == 0,
+    )
 
 
-def send_telegram(token: str, chat_id: str, title: str, content: str, api_base: str = "") -> bool:
-    """Send via Telegram Bot."""
+def send_telegram(
+    token: str, chat_id: str, title: str, content: str, api_base: str = ""
+) -> bool:
+    """Telegram Bot 推送。"""
     if not token or not chat_id:
         return False
-
     base = api_base.rstrip("/") if api_base else "https://api.telegram.org"
-    url = f"{base}/bot{token}/sendMessage"
-
-    try:
-        resp = httpx.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": f"*{title}*\n\n{content}",
-                "parse_mode": "Markdown",
-            },
-            timeout=TIMEOUT,
-        )
-        if resp.json().get("ok"):
-            logger.success("✅ Telegram: sent")
-            return True
-        logger.warning(f"Telegram failed: {resp.text}")
-    except Exception as e:
-        logger.warning(f"Telegram error: {e}")
-    return False
+    return _send_request(
+        "Telegram",
+        f"{base}/bot{token}/sendMessage",
+        payload={
+            "chat_id": chat_id,
+            "text": f"*{title}*\n\n{content}",
+            "parse_mode": "Markdown",
+        },
+        check_success=lambda r: r.get("ok") is True,
+    )
 
 
 def send_notification(config: NotifyConfig, title: str, content: str) -> int:
-    """Send notification via all configured providers.
+    """发送通知到所有已配置的渠道。
 
     Returns:
-        Number of successful sends.
+        成功发送的数量。
     """
     if not config.has_any_provider:
-        logger.info("No notification providers configured")
+        logger.info("未配置通知渠道")
         return 0
 
     count = 0
@@ -124,6 +115,5 @@ def send_notification(config: NotifyConfig, title: str, content: str) -> int:
             config.tg_bot_token, config.tg_user_id, title, content, config.tg_api_base
         )
 
-    logger.info(f"Notifications: {count} sent")
+    logger.info(f"通知发送完成: {count} 个渠道")
     return count
-

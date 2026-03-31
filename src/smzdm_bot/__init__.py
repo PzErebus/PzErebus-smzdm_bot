@@ -1,15 +1,4 @@
-"""SMZDM Bot - 什么值得买每日签到.
-
-Usage:
-    export SMZDM_COOKIE="your_cookie"
-    smzdm-bot run
-
-Or in Python:
-    >>> from smzdm_bot import SmzdmClient
-    >>> from smzdm_bot.config import UserConfig
-    >>> with SmzdmClient(UserConfig(cookie="...")) as client:
-    ...     print(client.checkin().to_message())
-"""
+"""SMZDM Bot - 什么值得买每日签到 (青龙面板版)。"""
 
 from smzdm_bot.client import SmzdmClient
 from smzdm_bot.config import NotifyConfig, Settings, UserConfig, get_settings

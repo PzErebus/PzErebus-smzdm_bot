@@ -1,12 +1,10 @@
-"""Data models for SMZDM Bot."""
-
-from dataclasses import dataclass
+"""数据模型定义。"""
 
 from pydantic import BaseModel, Field
 
 
 class CheckinResult(BaseModel):
-    """Check-in result with API field mapping."""
+    """签到结果。"""
 
     consecutive_days: int = Field(alias="daily_num", default=0)
     gold: int = Field(alias="cgold", default=0)
@@ -29,7 +27,7 @@ class CheckinResult(BaseModel):
 
 
 class VipInfo(BaseModel):
-    """VIP membership info."""
+    """VIP 会员信息。"""
 
     level: int = Field(alias="exp_level", default=0)
     experience: int = Field(alias="exp_current_level", default=0)
@@ -46,7 +44,7 @@ class VipInfo(BaseModel):
 
 
 class RewardInfo(BaseModel):
-    """Daily reward info."""
+    """每日奖励信息。"""
 
     title: str = ""
     content: str = Field(alias="content_str", default="")
@@ -64,9 +62,8 @@ class RewardInfo(BaseModel):
         return f"🎁 {self.title or self.content}"
 
 
-@dataclass
-class LotteryResult:
-    """Lottery draw result."""
+class LotteryResult(BaseModel):
+    """抽奖结果。"""
 
     success: bool = False
     message: str = "没有抽奖机会"
@@ -75,11 +72,10 @@ class LotteryResult:
         return f"🎰 {self.message}"
 
 
-@dataclass
-class TaskResult:
-    """Result of all tasks for a user."""
+class TaskResult(BaseModel):
+    """用户任务执行结果。"""
 
-    user_id: str
+    user_id: str = ""
     success: bool = True
     checkin: CheckinResult | None = None
     vip_info: VipInfo | None = None
@@ -102,5 +98,3 @@ class TaskResult:
             lines.append(f"❌ {self.error}")
 
         return "\n".join(lines)
-
-

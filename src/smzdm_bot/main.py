@@ -28,7 +28,6 @@ def run_all(settings: Settings | None = None) -> list[TaskResult]:
     logger.info(f"Running tasks for {len(users)} user(s)")
     results = [run_user(user) for user in users]
 
-    # Send notification
     notify = settings.get_notify_config()
     if notify.has_any_provider and results:
         ok = sum(1 for r in results if r.success)
@@ -42,7 +41,7 @@ def run_all(settings: Settings | None = None) -> list[TaskResult]:
 
 
 def main() -> int:
-    """CLI entry point."""
+    """Entry point for青龙面板."""
     results = run_all()
 
     if not results:

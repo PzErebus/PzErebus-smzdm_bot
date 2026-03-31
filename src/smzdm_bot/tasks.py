@@ -1,4 +1,4 @@
-"""SMZDM 任务执行 - 使用装饰器管理任务。"""
+"""SMZDM 任务执行模块。"""
 
 import random
 import re
@@ -8,28 +8,18 @@ from loguru import logger
 
 from smzdm_bot.client import SmzdmClient
 from smzdm_bot.models import CheckinResult, LotteryResult, RewardInfo, TaskResult, VipInfo
-from smzdm_bot.task_registry import TaskPriority, TaskRegistry
-
-# 创建任务注册器
-tasks = TaskRegistry()
+from smzdm_bot.task_registry import TaskPriority, TaskRunResult, tasks
 
 
 class TaskRunner:
-    """任务执行器。
+    """任务执行器。"""
 
-    使用装饰器注册任务，自动管理执行顺序和错误处理。
-
-    用法:
-        with SmzdmClient(config) as client:
-            runner = TaskRunner(client)
-            results = runner.run_all()
-    """
+    VIEW_TASK_TYPES = ("faxian", "haojia", "article", "yuanchuang")
+    FOLLOW_EVENT_TYPES = ("interactive.follow.user", "interactive.follow.tag")
 
     def __init__(self, client: SmzdmClient) -> None:
         self.client = client
         self.user_id = client.user_id
-
-    # ==================== 核心任务 ====================
 
     @tasks.task(name="签到", priority=TaskPriority.HIGH, optional=False)
     def checkin(self) -> CheckinResult:
@@ -47,8 +37,6 @@ class TaskRunner:
         logger.info(f"VIP 等级: {result.level}")
         return result
 
-    # ==================== 奖励任务 ====================
-
     @tasks.task(name="签到奖励", priority=TaskPriority.NORMAL)
     def get_all_reward(self) -> RewardInfo:
         """获取签到奖励。"""
@@ -60,7 +48,6 @@ class TaskRunner:
                 logger.info(f"奖励: {result.title or result.content}")
             return result
         except Exception:
-            # 忽略 "今日已领取" 等错误
             return RewardInfo()
 
     @tasks.task(name="额外奖励", priority=TaskPriority.NORMAL)
@@ -77,8 +64,6 @@ class TaskRunner:
         logger.info("无额外奖励")
         return False
 
-    # ==================== 抽奖任务 ====================
-
     @tasks.task(name="抽奖转盘", priority=TaskPriority.LOW, delay=(2, 5))
     def draw_lottery(self) -> LotteryResult:
         """抽奖转盘。"""
@@ -94,21 +79,16 @@ class TaskRunner:
         time.sleep(random.randint(1, 3))
         data = self.client.get_jsonp(f"{self.client.WEB_BASE}/user/lottery/jsonp_draw", params)
         if data:
-            msg = data.get("error_msg", "抽奖完成")
-            return LotteryResult(success=True, message=msg)
+            return LotteryResult(success=True, message=data.get("error_msg", "抽奖完成"))
 
         return LotteryResult(success=False, message="抽奖失败")
 
     @tasks.task(name="幸运屋抽奖", priority=TaskPriority.LOW, delay=(2, 5))
     def draw_crowd(self) -> int:
         """幸运屋免费抽奖。"""
-        # 获取免费抽奖 ID
         try:
             html = self.client.get_html(f"{self.client.WEB_BASE}/user/crowd/")
-            pattern = (
-                r'data-crowd_id="(\d+)"[^>]*>[^<]*<div[^>]*>\s*'
-                r"免费抽奖?\s*</div>\s*<span[^>]*>-0</span>"
-            )
+            pattern = r'data-crowd_id="(\d+)"[^>]*>[^<]*<div[^>]*>\s*免费抽奖?\s*</div>\s*<span[^>]*>-0</span>'
             crowd_ids = re.findall(pattern, html, re.I)
         except Exception:
             crowd_ids = []
@@ -123,12 +103,7 @@ class TaskRunner:
                 referer = f"{self.client.WEB_BASE}/user/crowd/p/{crowd_id}/"
                 data = self.client.post_web(
                     f"{self.client.WEB_BASE}/user/crowd/ajax_participate",
-                    data={
-                        "crowd_id": crowd_id,
-                        "sourcePage": referer,
-                        "client_type": "android",
-                        "price_id": 1,
-                    },
+                    data={"crowd_id": crowd_id, "sourcePage": referer, "client_type": "android", "price_id": 1},
                     referer=referer,
                 )
                 if data.get("error_code") == 0:
@@ -141,8 +116,6 @@ class TaskRunner:
 
         return count
 
-    # ==================== 每日任务 ====================
-
     @tasks.task(name="每日任务", priority=TaskPriority.LOW, delay=(2, 5))
     def run_daily_tasks(self) -> int:
         """执行每日任务。"""
@@ -154,7 +127,6 @@ class TaskRunner:
                 return 0
 
             first_row = rows[0]
-
             if isinstance(first_row, list):
                 return 0
 
@@ -169,12 +141,7 @@ class TaskRunner:
 
             completed = 0
             for group in task_groups:
-                if isinstance(group, dict):
-                    tasks_list = group.get("task_list", [])
-                elif isinstance(group, list):
-                    tasks_list = group
-                else:
-                    continue
+                tasks_list = group if isinstance(group, list) else group.get("task_list", [])
                 for task in tasks_list:
                     completed += self._process_task(task)
 
@@ -185,10 +152,8 @@ class TaskRunner:
             logger.warning(f"每日任务失败: {e}")
             return 0
 
-    # ==================== 任务处理辅助方法 ====================
-
     def _process_task(self, task: dict) -> int:
-        """处理单个任务，返回完成数量（0或1）。"""
+        """处理单个任务，返回完成数量。"""
         if not isinstance(task, dict):
             return 0
 
@@ -200,30 +165,22 @@ class TaskRunner:
         task_type = redirect.get("link_type", "") if isinstance(redirect, dict) else ""
         event_type = task.get("task_event_type", "")
 
-        # 未完成 (status=2)
         if status == 2:
             logger.info(f"执行: {name}")
-            task_done = False
 
-            # 浏览类任务
-            if task_type in ("faxian", "haojia", "article", "yuanchuang"):
-                task_done = self._do_view_task(task)
-            # 关注任务
-            elif event_type in (
-                "interactive.follow.user",
-                "interactive.follow.tag",
-            ) or task_type in ("guanzhu", "lanmu"):
-                task_done = self._do_follow_task(task)
+            if task_type in self.VIEW_TASK_TYPES:
+                if self._do_view_task(task):
+                    time.sleep(random.randint(3, 8))
+                    return 1 if self._claim_task_reward(task_id, name) else 0
+            elif event_type in self.FOLLOW_EVENT_TYPES or task_type in ("guanzhu", "lanmu"):
+                if self._do_follow_task(task):
+                    time.sleep(random.randint(3, 8))
+                    return 1 if self._claim_task_reward(task_id, name) else 0
             else:
                 logger.debug(f"跳过: {task_type}")
 
-            if task_done:
-                time.sleep(random.randint(3, 8))
-                return 1 if self._claim_task_reward(task_id, name) else 0
-
             time.sleep(random.randint(3, 8))
 
-        # 待领取 (status=3)
         elif status == 3:
             logger.info(f"领取: {name}")
             if self._claim_task_reward(task_id, name):
@@ -250,24 +207,19 @@ class TaskRunner:
         try:
             self.client.post(
                 "/task/event_view_article_sync",
-                {
-                    "article_id": article_id,
-                    "channel_id": channel_id,
-                    "task_id": task_id,
-                },
+                {"article_id": article_id, "channel_id": channel_id, "task_id": task_id},
             )
             return True
         except Exception:
             return False
 
     def _do_follow_task(self, task: dict) -> bool:
-        """执行关注任务（关注后取关）。"""
+        """执行关注任务。"""
         redirect = task.get("task_redirect_url", {})
         redirect = redirect if isinstance(redirect, dict) else {}
         link_type = redirect.get("link_type", "")
         link_val = redirect.get("link_val", "")
 
-        # 关注用户
         if link_type == "guanzhu" or task.get("task_event_type") == "interactive.follow.user":
             user = self._get_random_user()
             if not user:
@@ -281,7 +233,6 @@ class TaskRunner:
                 self._follow(user_id, nickname, "user", "unfollow")
                 return True
 
-        # 关注栏目
         elif link_type == "lanmu" and link_val:
             keyword = redirect.get("link_title", link_val)
             if self._follow(link_val, keyword, "tag", "follow"):
@@ -325,19 +276,14 @@ class TaskRunner:
         except Exception:
             return False
 
-    # ==================== 执行入口 ====================
-
     def run_all(self) -> TaskResult:
         """执行所有注册的任务。"""
         logger.info(f"===== 用户: {self.user_id} =====")
 
-        # 使用任务注册器执行所有任务
-        task_results = tasks.run_all(self)
+        task_results: list[TaskRunResult] = tasks.run_all(self)
 
-        # 汇总结果
         result = TaskResult(user_id=self.user_id)
 
-        # 提取具体结果
         for r in task_results:
             if r.data:
                 if isinstance(r.data, CheckinResult):
@@ -349,7 +295,6 @@ class TaskRunner:
                 elif isinstance(r.data, LotteryResult):
                     result.lottery = r.data
 
-        # 只有签到失败才标记整体失败
         checkin_result = next((r for r in task_results if r.name == "签到"), None)
         result.success = checkin_result is not None and checkin_result.success
 
