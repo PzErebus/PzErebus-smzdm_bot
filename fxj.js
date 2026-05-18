@@ -22,6 +22,19 @@ if (!username || !password) {
     process.exit(1);
 }
 
+async function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function randomDelay() {
+    // 随机延迟 1-30 分钟
+    const delayMinutes = Math.floor(Math.random() * 30) + 1;
+    const delayMs = delayMinutes * 60 * 1000;
+    
+    console.log(`[Holivator] 随机延迟 ${delayMinutes} 分钟开始执行...`);
+    await sleep(delayMs);
+}
+
 async function request(url, options = {}) {
     const defaultHeaders = {
         'content-type': 'application/json',
@@ -67,12 +80,13 @@ async function login() {
 async function checkin(token) {
     console.log('[Holivator] 开始签到');
     
-    // 尝试多个可能的签到接口
     const endpoints = [
         { path: '/api/v1/user/attendance', method: 'POST' },
         { path: '/api/v1/user/attendance', method: 'GET' },
         { path: '/api/v1/attendance', method: 'POST' },
-        { path: '/api/v1/attendance', method: 'GET' }
+        { path: '/api/v1/attendance', method: 'GET' },
+        { path: '/api/user/attendance', method: 'POST' },
+        { path: '/api/user/attendance', method: 'GET' }
     ];
     
     for (const { path, method } of endpoints) {
@@ -88,10 +102,10 @@ async function checkin(token) {
                 if (checkBody.code === 0 || checkBody.code === 1 || checkBody.success) {
                     const points = checkBody.data?.points_earned || checkBody.data?.points || '?';
                     console.log(`[Holivator] 签到成功! 获得积分: ${points}`);
-                    return true;
+                    return { success: true, points: parseInt(points) || 0 };
                 } else if (checkBody.message) {
                     console.log(`[Holivator] 签到结果: ${checkBody.message}`);
-                    return true;
+                    return { success: true, points: 0 };
                 }
             }
         } catch (e) {
@@ -100,7 +114,7 @@ async function checkin(token) {
     }
     
     console.log('[Holivator] 签到失败: 未找到可用的签到接口');
-    return false;
+    return { success: false, points: 0 };
 }
 
 async function getPointsInfo(token) {
@@ -153,14 +167,17 @@ async function exchangePoints(token, points) {
 
 async function run() {
     try {
+        // 随机延迟 1-30 分钟
+        await randomDelay();
+        
         // 登录
         const token = await login();
         
         // 签到
-        await checkin(token);
+        const checkinResult = await checkin(token);
         
-        // 积分兑换
-        if (autoExchange) {
+        // 只有签到成功后才进行积分兑换
+        if (checkinResult.success && autoExchange) {
             const info = await getPointsInfo(token);
             console.log(`[Holivator] 当前积分: ${info.pointsBalance}, 今日剩余兑换: ${info.remainingToday}`);
             
@@ -171,6 +188,8 @@ async function run() {
             } else {
                 console.log(`[Holivator] 积分不足，跳过兑换 (当前: ${exchangePointsAmount}, 最少: ${minPoints})`);
             }
+        } else if (!checkinResult.success) {
+            console.log('[Holivator] 签到失败，跳过积分兑换');
         } else {
             console.log('[Holivator] 已禁用自动兑换');
         }
