@@ -15,9 +15,16 @@ Environment Variables:
     SMZDM_TG_BOT_TOKEN: Telegram bot token
     SMZDM_TG_USER_ID: Telegram user/chat ID
     SMZDM_TG_API_BASE: Custom Telegram API base URL
+
+    青龙面板标准变量（自动识别）:
+    PUSH_PLUS_TOKEN: PushPlus token
+    SCKEY: ServerChan key
+    TG_BOT_TOKEN: Telegram bot token
+    TG_USER_ID: Telegram user/chat ID
 """
 
 import json
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, field_validator
@@ -100,6 +107,42 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("push_plus_token", mode="before")
+    @classmethod
+    def validate_push_plus_token(cls, v: str) -> str:
+        """优先使用脚本变量，其次使用青龙面板变量。"""
+        if v:
+            return v
+        # 青龙面板标准变量
+        return os.environ.get("PUSH_PLUS_TOKEN", "")
+
+    @field_validator("sc_key", mode="before")
+    @classmethod
+    def validate_sc_key(cls, v: str) -> str:
+        """优先使用脚本变量，其次使用青龙面板变量。"""
+        if v:
+            return v
+        # 青龙面板标准变量
+        return os.environ.get("SCKEY", "")
+
+    @field_validator("tg_bot_token", mode="before")
+    @classmethod
+    def validate_tg_bot_token(cls, v: str) -> str:
+        """优先使用脚本变量，其次使用青龙面板变量。"""
+        if v:
+            return v
+        # 青龙面板标准变量
+        return os.environ.get("TG_BOT_TOKEN", "")
+
+    @field_validator("tg_user_id", mode="before")
+    @classmethod
+    def validate_tg_user_id(cls, v: str) -> str:
+        """优先使用脚本变量，其次使用青龙面板变量。"""
+        if v:
+            return v
+        # 青龙面板标准变量
+        return os.environ.get("TG_USER_ID", "")
 
     def get_users(self) -> list[UserConfig]:
         """Get list of user configurations."""
