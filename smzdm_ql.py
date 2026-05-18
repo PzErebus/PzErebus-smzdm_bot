@@ -74,11 +74,22 @@ def main() -> None:
     repo_dir = get_repo_dir()
     print(f"[INFO] 仓库目录: {repo_dir}")
 
+    # 设置 PYTHONPATH 以包含 src 目录
+    env = os.environ.copy()
+    src_dir = repo_dir / "src"
+    if src_dir.exists():
+        current_pythonpath = env.get("PYTHONPATH", "")
+        if current_pythonpath:
+            env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{current_pythonpath}"
+        else:
+            env["PYTHONPATH"] = str(src_dir)
+        print(f"[INFO] 设置 PYTHONPATH: {env['PYTHONPATH']}")
+
     cmd = [
         sys.executable, "-m", "smzdm_bot.main"
     ]
 
-    result = subprocess.run(cmd, cwd=str(repo_dir))
+    result = subprocess.run(cmd, cwd=str(repo_dir), env=env)
     sys.exit(result.returncode)
 
 
