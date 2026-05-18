@@ -29,13 +29,22 @@ def run_all(settings: Settings | None = None) -> list[TaskResult]:
     results = [run_user(user) for user in users]
 
     notify = settings.get_notify_config()
+    logger.info(f"通知配置 - PushPlus: {'已配置' if notify.push_plus_token else '未配置'}")
+    logger.info(f"通知配置 - ServerChan: {'已配置' if notify.sc_key else '未配置'}")
+    logger.info(f"通知配置 - 企业微信: {'已配置' if notify.wecom_webhook else '未配置'}")
+    logger.info(f"通知配置 - Telegram: {'已配置' if (notify.tg_bot_token and notify.tg_user_id) else '未配置'}")
+    logger.info(f"是否有可用通知渠道: {notify.has_any_provider}")
+
     if notify.has_any_provider and results:
         ok = sum(1 for r in results if r.success)
+        logger.info(f"发送通知: {ok}/{len(results)}")
         send_notification(
             notify,
             title=f"SMZDM ({ok}/{len(results)})",
             content="\n\n".join(r.to_message() for r in results),
         )
+    elif not notify.has_any_provider:
+        logger.info("未配置任何通知渠道，跳过推送")
 
     return results
 
