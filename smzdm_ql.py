@@ -26,10 +26,14 @@ REPO_NAME = "PzErebus_PzErebus-smzdm_bot"
 
 def get_repo_dir() -> Path:
     """获取仓库目录路径."""
+    script_dir = Path(__file__).parent
     possible_paths = [
         Path("/ql/data/repo", REPO_NAME),
         Path("/ql/repo", REPO_NAME),
+        Path("/ql/data/scripts", REPO_NAME),
         Path("/ql/scripts", REPO_NAME),
+        script_dir,
+        script_dir / REPO_NAME,
     ]
     for p in possible_paths:
         if p.exists():
