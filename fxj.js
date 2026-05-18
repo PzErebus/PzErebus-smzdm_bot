@@ -17,13 +17,17 @@ if (!username || !password) {
 async function request(url, options = {}) {
     const defaultHeaders = {
         'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'accept': 'application/json, text/plain, */*',
+        'origin': BASE_URL,
+        'referer': `${BASE_URL}/`
     };
     
     const fetchOptions = {
         method: options.method || 'GET',
         headers: { ...defaultHeaders, ...options.headers },
-        body: options.body ? JSON.stringify(options.body) : undefined
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        credentials: 'include'
     };
     
     const res = await fetch(url, fetchOptions);
@@ -55,44 +59,58 @@ async function run() {
         console.log('[Holivator] 登录成功');
         console.log('[Holivator] Token获取成功');
 
-        // 尝试不同的签到接口路径
+        // 尝试不同的签到接口路径和方法
         const possibleEndpoints = [
-            '/api/v1/user/attendance',
-            '/api/v1/attendance',
-            '/api/user/attendance',
-            '/api/attendance',
-            '/attendance'
+            { path: '/api/v1/user/attendance', method: 'POST' },
+            { path: '/api/v1/user/attendance', method: 'GET' },
+            { path: '/api/v1/attendance', method: 'POST' },
+            { path: '/api/v1/attendance', method: 'GET' },
+            { path: '/api/user/attendance', method: 'POST' },
+            { path: '/api/user/attendance', method: 'GET' },
+            { path: '/api/attendance', method: 'POST' },
+            { path: '/api/attendance', method: 'GET' },
+            { path: '/api/v1/checkin', method: 'POST' },
+            { path: '/api/v1/checkin', method: 'GET' },
+            { path: '/checkin', method: 'POST' },
+            { path: '/user/attendance', method: 'POST' },
+            { path: '/attendance', method: 'POST' },
+            { path: '/attendance', method: 'GET' }
         ];
         
         let success = false;
-        for (const endpoint of possibleEndpoints) {
-            const checkRes = await request(`${BASE_URL}${endpoint}`, {
-                method: 'POST',
+        for (const { path, method } of possibleEndpoints) {
+            const checkRes = await request(`${BASE_URL}${path}`, {
+                method: method,
                 headers: { 'authorization': `Bearer ${token}` }
             });
             
-            console.log(`[Holivator] 尝试 ${endpoint} - 状态: ${checkRes.status}`);
+            console.log(`[Holivator] 尝试 ${method} ${path} - 状态: ${checkRes.status}`);
             
             try {
                 const checkBody = JSON.parse(checkRes.body);
                 
                 if (checkRes.status === 200 || checkRes.status === 201) {
-                    if (checkBody.code === 0 || checkBody.code === 1 || checkBody.success) {
+                    if (checkBody.code === 0 || checkBody.code === 1 || checkBody.success || 
+                        (checkBody.message && !checkBody.message.includes('Not Found'))) {
                         console.log('[Holivator] 签到成功!');
                         console.log('[Holivator] 响应:', JSON.stringify(checkBody, null, 2));
                         success = true;
                         break;
                     } else if (checkBody.message) {
-                        console.log(`[Holivator] ${endpoint} - 结果: ${checkBody.message}`);
+                        console.log(`[Holivator] ${method} ${path} - 结果: ${checkBody.message}`);
                     }
+                } else if (checkRes.status === 401) {
+                    console.log(`[Holivator] ${method} ${path} - 未授权，请检查Token`);
                 }
             } catch (e) {
-                console.log(`[Holivator] ${endpoint} - 非JSON响应:`, checkRes.body.substring(0, 100));
+                console.log(`[Holivator] ${method} ${path} - 非JSON响应:`, checkRes.body.substring(0, 150));
             }
         }
         
         if (!success) {
-            console.log('[Holivator] 所有接口尝试失败，可能需要手动抓包更新接口地址');
+            console.log('[Holivator] 所有接口尝试失败');
+            console.log('[Holivator] 请手动抓包获取最新的签到接口地址');
+            console.log('[Holivator] 步骤: 1. 打开浏览器开发者工具 2. 登录Holivator 3. 点击签到 4. 查看Network请求');
         }
         
     } catch (err) {
