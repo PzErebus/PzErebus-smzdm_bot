@@ -164,8 +164,16 @@ class TaskRunner:
     def get_points_balance(self) -> PointsBalance:
         """获取积分余额。"""
         try:
-            data = self.client.post("/user/points")
-            data = data.get("data", {})
+            try:
+                data = self.client.post("/user/info")
+                data = data.get("data", {})
+            except Exception:
+                try:
+                    data = self.client.post("/vip")
+                    data = data.get("data", {}).get("user_info", {})
+                except Exception:
+                    data = {}
+            
             result = PointsBalance(
                 gold=data.get("gold", 0),
                 points=data.get("points", 0),
@@ -221,8 +229,19 @@ class TaskRunner:
     def run_points_tasks(self) -> int:
         """执行积分任务中心的任务。"""
         try:
-            data = self.client.post("/task/points_task_list")
-            task_list = data.get("data", {}).get("task_list", [])
+            try:
+                data = self.client.post("/task/points_task_list")
+                task_list = data.get("data", {}).get("task_list", [])
+            except Exception:
+                try:
+                    data = self.client.post("/task/list_v2")
+                    task_list = data.get("data", {}).get("task_list", [])
+                except Exception:
+                    task_list = []
+            
+            if not task_list:
+                logger.info("无积分任务")
+                return 0
             
             completed = 0
             for task in task_list:
@@ -263,28 +282,29 @@ class TaskRunner:
                 return 0
 
             completed = 0
-            for video in videos[:5]:
-                video_id = video.get("video_id", "")
+            for video in videos[:3]:
+                video_id = video.get("video_id", "") or video.get("article_id", "")
                 title = video.get("title", "")[:20]
                 
                 if not video_id:
                     continue
 
                 logger.info(f"🎬 观看视频: {title}...")
-                time.sleep(random.randint(15, 30))
+                time.sleep(random.randint(10, 20))
                 
-                if self._report_video_progress(video_id, duration=30):
+                if self._report_video_progress(video_id, duration=20):
                     if self._claim_video_reward(video_id):
                         logger.info(f"✅ 视频观看完成: {title}")
                         completed += 1
                     else:
-                        logger.warning(f"❌ 领取视频奖励失败: {title}")
+                        logger.debug(f"领取视频奖励失败: {title}")
                 else:
-                    logger.warning(f"❌ 视频观看上报失败: {title}")
+                    logger.debug(f"视频观看上报失败: {title}")
                 
-                time.sleep(random.randint(3, 6))
+                time.sleep(random.randint(2, 4))
 
-            logger.info(f"视频任务完成: {completed}")
+            if completed > 0:
+                logger.info(f"视频任务完成: {completed}")
             return completed
         except Exception as e:
             logger.warning(f"视频任务执行失败: {e}")
@@ -294,14 +314,24 @@ class TaskRunner:
         """获取视频列表。"""
         try:
             data = self.client.post("/video/recommend_list", {"page": 1, "limit": 10})
-            return data.get("data", {}).get("rows", [])
+            videos = data.get("data", {}).get("rows", [])
+            if videos:
+                return videos
         except Exception:
-            try:
-                data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
-                articles = data.get("data", {}).get("rows", [])
-                return [a for a in articles if a.get("article_type") == "video" or "video" in str(a)]
-            except Exception:
-                return []
+            pass
+        
+        try:
+            data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
+            articles = data.get("data", {}).get("rows", [])
+            return [a for a in articles if a.get("article_type") == "video" or "video" in str(a)]
+        except Exception:
+            pass
+        
+        try:
+            data = self.client.post("/home/index")
+            return data.get("data", {}).get("video_list", [])
+        except Exception:
+            return []
 
     def _report_video_progress(self, video_id: str, duration: int = 30) -> bool:
         """上报视频观看进度。"""
