@@ -66,6 +66,13 @@ pydantic-settings
 | `SMZDM_WECOM_WEBHOOK` | 企业微信Webhook | ❌ |
 | `SMZDM_TG_BOT_TOKEN` | Telegram Bot Token | ❌ |
 | `SMZDM_TG_USER_ID` | Telegram User ID | ❌ |
+| `SMZDM_DELAY_MIN` | 随机延迟最小秒数（默认0） | ❌ |
+| `SMZDM_DELAY_MAX` | 随机延迟最大秒数（默认3600，即1小时） | ❌ |
+
+**延时启动功能**：
+- 定时任务触发后，会随机延迟一段时间再执行，避免固定时间被识别
+- 例如：设置 `SMZDM_DELAY_MAX=1800`，则会在 0-30 分钟内随机延迟后执行
+- 设置 `SMZDM_DELAY_MAX=0` 可禁用延迟
 
 ### 4. 多账号配置
 
