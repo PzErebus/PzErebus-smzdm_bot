@@ -30,7 +30,7 @@ from pathlib import Path
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from smzdm_bot.exceptions import ConfigurationError
+from smzdm_bot.client import ConfigurationError
 
 
 def _find_dotenv() -> Path | None:
