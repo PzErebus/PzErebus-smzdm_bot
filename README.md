@@ -91,11 +91,12 @@ pydantic-settings
 smzdm_bot/
 ├── src/smzdm_bot/
 │   ├── __init__.py      # 模块导出
-│   ├── client.py        # HTTP 客户端、签名和异常定义
+│   ├── client.py        # HTTP 客户端和签名
 │   ├── main.py          # 主入口
 │   ├── models.py        # 数据模型
 │   ├── notify.py        # 通知模块
 │   ├── tasks.py         # 任务执行和任务注册器
+│   ├── exceptions.py    # 异常定义
 │   └── config/
 │       └── __init__.py  # 配置管理
 ├── smzdm_ql.py          # 青龙面板入口
