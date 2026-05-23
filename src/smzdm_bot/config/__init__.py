@@ -185,7 +185,7 @@ class Settings(BaseSettings):
 
     def get_notify_config(self) -> NotifyConfig:
         """Get notification configuration."""
-        return NotifyConfig(
+        config = NotifyConfig(
             push_plus_token=self.push_plus_token,
             sc_key=self.sc_key,
             wecom_webhook=self.wecom_webhook,
@@ -193,6 +193,17 @@ class Settings(BaseSettings):
             tg_user_id=self.tg_user_id,
             tg_api_base=self.tg_api_base,
         )
+        
+        # 调试日志
+        if self.debug:
+            import sys
+            print(f"[DEBUG] PushPlus Token configured: {bool(config.push_plus_token)}", file=sys.stderr)
+            print(f"[DEBUG] SC Key configured: {bool(config.sc_key)}", file=sys.stderr)
+            print(f"[DEBUG] WeCom Webhook configured: {bool(config.wecom_webhook)}", file=sys.stderr)
+            print(f"[DEBUG] Telegram configured: {bool(config.tg_bot_token and config.tg_user_id)}", file=sys.stderr)
+            print(f"[DEBUG] Has any provider: {config.has_any_provider}", file=sys.stderr)
+        
+        return config
 
 
 _settings: Settings | None = None
