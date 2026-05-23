@@ -72,6 +72,32 @@ class LotteryResult(BaseModel):
         return f"🎰 {self.message}"
 
 
+class ArticleResult(BaseModel):
+    """文章操作结果。"""
+
+    success: bool = False
+    article_id: str = ""
+    action: str = ""
+    points: int = 0
+    message: str = ""
+
+    def to_message(self) -> str:
+        if self.success:
+            return f"✅ {self.action}成功 | 文章ID: {self.article_id} | 积分: +{self.points}"
+        return f"❌ {self.action}失败: {self.message}"
+
+
+class PointsBalance(BaseModel):
+    """积分余额信息。"""
+
+    gold: int = 0
+    points: int = 0
+    coins: int = 0
+
+    def to_message(self) -> str:
+        return f"💰 金币: {self.gold} | 💎 积分: {self.points} | 🪙 碎银: {self.coins}"
+
+
 class TaskResult(BaseModel):
     """用户任务执行结果。"""
 
@@ -81,6 +107,7 @@ class TaskResult(BaseModel):
     vip_info: VipInfo | None = None
     reward: RewardInfo | None = None
     lottery: LotteryResult | None = None
+    points_balance: PointsBalance | None = None
     error: str | None = None
 
     def to_message(self) -> str:
@@ -94,6 +121,8 @@ class TaskResult(BaseModel):
             lines.append(self.reward.to_message())
         if self.lottery:
             lines.append(self.lottery.to_message())
+        if self.points_balance:
+            lines.append(self.points_balance.to_message())
         if self.error:
             lines.append(f"❌ {self.error}")
 

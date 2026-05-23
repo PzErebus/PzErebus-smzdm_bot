@@ -7,7 +7,15 @@ import time
 from loguru import logger
 
 from smzdm_bot.client import SmzdmClient
-from smzdm_bot.models import CheckinResult, LotteryResult, RewardInfo, TaskResult, VipInfo
+from smzdm_bot.models import (
+    ArticleResult,
+    CheckinResult,
+    LotteryResult,
+    PointsBalance,
+    RewardInfo,
+    TaskResult,
+    VipInfo,
+)
 from smzdm_bot.task_registry import TaskPriority, TaskRunResult, tasks
 
 
@@ -152,6 +160,149 @@ class TaskRunner:
             logger.warning(f"每日任务失败: {e}")
             return 0
 
+    @tasks.task(name="积分余额", priority=TaskPriority.NORMAL, delay=(1, 3))
+    def get_points_balance(self) -> PointsBalance:
+        """获取积分余额。"""
+        try:
+            data = self.client.post("/user/points")
+            data = data.get("data", {})
+            result = PointsBalance(
+                gold=data.get("gold", 0),
+                points=data.get("points", 0),
+                coins=data.get("coins", 0),
+            )
+            logger.info(f"💰 金币: {result.gold} | 💎 积分: {result.points} | 🪙 碎银: {result.coins}")
+            return result
+        except Exception as e:
+            logger.warning(f"获取积分余额失败: {e}")
+            return PointsBalance()
+
+    @tasks.task(name="文章点赞", priority=TaskPriority.LOW, delay=(2, 4))
+    def like_article(self) -> ArticleResult:
+        """文章点赞获取积分。"""
+        try:
+            articles = self._get_recommend_articles()
+            if not articles:
+                return ArticleResult(success=False, action="点赞", message="无推荐文章")
+
+            article = random.choice(articles)
+            article_id = article.get("article_id", "")
+            if not article_id:
+                return ArticleResult(success=False, action="点赞", message="无效文章ID")
+
+            self.client.post("/article/like", {"article_id": article_id})
+            logger.info(f"👍 点赞文章: {article_id}")
+            return ArticleResult(success=True, article_id=article_id, action="点赞", points=1)
+        except Exception as e:
+            logger.warning(f"文章点赞失败: {e}")
+            return ArticleResult(success=False, action="点赞", message=str(e))
+
+    @tasks.task(name="文章收藏", priority=TaskPriority.LOW, delay=(2, 4))
+    def collect_article(self) -> ArticleResult:
+        """收藏文章获取积分。"""
+        try:
+            articles = self._get_recommend_articles()
+            if not articles:
+                return ArticleResult(success=False, action="收藏", message="无推荐文章")
+
+            article = random.choice(articles)
+            article_id = article.get("article_id", "")
+            if not article_id:
+                return ArticleResult(success=False, action="收藏", message="无效文章ID")
+
+            self.client.post("/article/collect", {"article_id": article_id})
+            logger.info(f"❤️ 收藏文章: {article_id}")
+            return ArticleResult(success=True, article_id=article_id, action="收藏", points=2)
+        except Exception as e:
+            logger.warning(f"文章收藏失败: {e}")
+            return ArticleResult(success=False, action="收藏", message=str(e))
+
+    @tasks.task(name="积分任务", priority=TaskPriority.LOW, delay=(2, 5))
+    def run_points_tasks(self) -> int:
+        """执行积分任务中心的任务。"""
+        try:
+            data = self.client.post("/task/points_task_list")
+            task_list = data.get("data", {}).get("task_list", [])
+            
+            completed = 0
+            for task in task_list:
+                task_id = task.get("task_id", "")
+                task_name = task.get("task_name", "")
+                status = task.get("task_status", 0)
+                points = task.get("task_points", 0)
+                
+                if status == 1:
+                    logger.info(f"已完成: {task_name}")
+                    continue
+                
+                if status == 2:
+                    if self._execute_points_task(task):
+                        time.sleep(random.randint(3, 6))
+                        if self._claim_points_reward(task_id):
+                            logger.info(f"✅ 完成任务: {task_name} (+{points}积分)")
+                            completed += 1
+                
+                elif status == 3:
+                    if self._claim_points_reward(task_id):
+                        logger.info(f"✅ 领取奖励: {task_name} (+{points}积分)")
+                        completed += 1
+
+            logger.info(f"积分任务完成: {completed}")
+            return completed
+        except Exception as e:
+            logger.warning(f"积分任务执行失败: {e}")
+            return 0
+
+    def _get_recommend_articles(self) -> list[dict]:
+        """获取推荐文章列表。"""
+        try:
+            data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
+            return data.get("data", {}).get("rows", [])
+        except Exception:
+            return []
+
+    def _execute_points_task(self, task: dict) -> bool:
+        """执行积分任务。"""
+        task_type = task.get("task_type", "")
+        article_id = task.get("article_id", "")
+        
+        try:
+            if task_type in ("view", "read"):
+                if article_id:
+                    self.client.post("/task/event_view_article_sync", {"article_id": article_id})
+                    time.sleep(random.randint(10, 20))
+                    return True
+            
+            elif task_type == "share":
+                if article_id:
+                    self.client.post("/task/share_article", {"article_id": article_id})
+                    return True
+            
+            elif task_type == "comment":
+                if article_id:
+                    comments = ["不错", "很好", "支持", "点赞", "收藏了"]
+                    comment = random.choice(comments)
+                    self.client.post("/comment/add", {"article_id": article_id, "content": comment})
+                    return True
+            
+            elif task_type in ("follow", "attention"):
+                user_id = task.get("user_id", "")
+                if user_id:
+                    self.client.post("/dingyue/follow", {"keyword_id": user_id, "keyword": "", "type": "user"}, base=self.client.DINGYUE_API)
+                    return True
+        except Exception as e:
+            logger.debug(f"执行积分任务失败: {e}")
+        
+        return False
+
+    def _claim_points_reward(self, task_id: str) -> bool:
+        """领取积分任务奖励。"""
+        try:
+            self.client.post("/task/points_task_receive", {"task_id": task_id})
+            return True
+        except Exception:
+            return False
+
     def _process_task(self, task: dict) -> int:
         """处理单个任务，返回完成数量。"""
         if not isinstance(task, dict):
@@ -294,6 +445,8 @@ class TaskRunner:
                     result.reward = r.data
                 elif isinstance(r.data, LotteryResult):
                     result.lottery = r.data
+                elif isinstance(r.data, PointsBalance):
+                    result.points_balance = r.data
 
         checkin_result = next((r for r in task_results if r.name == "签到"), None)
         result.success = checkin_result is not None and checkin_result.success
