@@ -253,6 +253,86 @@ class TaskRunner:
             logger.warning(f"积分任务执行失败: {e}")
             return 0
 
+    @tasks.task(name="视频任务", priority=TaskPriority.LOW, delay=(2, 5))
+    def run_video_tasks(self) -> int:
+        """执行视频观看任务获取碎银。"""
+        try:
+            videos = self._get_video_list()
+            if not videos:
+                logger.info("无视频可观看")
+                return 0
+
+            completed = 0
+            for video in videos[:5]:
+                video_id = video.get("video_id", "")
+                title = video.get("title", "")[:20]
+                
+                if not video_id:
+                    continue
+
+                logger.info(f"🎬 观看视频: {title}...")
+                time.sleep(random.randint(15, 30))
+                
+                if self._report_video_progress(video_id, duration=30):
+                    if self._claim_video_reward(video_id):
+                        logger.info(f"✅ 视频观看完成: {title}")
+                        completed += 1
+                    else:
+                        logger.warning(f"❌ 领取视频奖励失败: {title}")
+                else:
+                    logger.warning(f"❌ 视频观看上报失败: {title}")
+                
+                time.sleep(random.randint(3, 6))
+
+            logger.info(f"视频任务完成: {completed}")
+            return completed
+        except Exception as e:
+            logger.warning(f"视频任务执行失败: {e}")
+            return 0
+
+    def _get_video_list(self) -> list[dict]:
+        """获取视频列表。"""
+        try:
+            data = self.client.post("/video/recommend_list", {"page": 1, "limit": 10})
+            return data.get("data", {}).get("rows", [])
+        except Exception:
+            try:
+                data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
+                articles = data.get("data", {}).get("rows", [])
+                return [a for a in articles if a.get("article_type") == "video" or "video" in str(a)]
+            except Exception:
+                return []
+
+    def _report_video_progress(self, video_id: str, duration: int = 30) -> bool:
+        """上报视频观看进度。"""
+        try:
+            self.client.post(
+                "/video/progress_report",
+                {"video_id": video_id, "duration": duration, "progress": 100}
+            )
+            return True
+        except Exception:
+            try:
+                self.client.post(
+                    "/task/video_watch",
+                    {"video_id": video_id, "watch_time": duration}
+                )
+                return True
+            except Exception:
+                return False
+
+    def _claim_video_reward(self, video_id: str) -> bool:
+        """领取视频观看奖励。"""
+        try:
+            self.client.post("/video/claim_reward", {"video_id": video_id})
+            return True
+        except Exception:
+            try:
+                self.client.post("/task/video_reward", {"video_id": video_id})
+                return True
+            except Exception:
+                return False
+
     def _get_recommend_articles(self) -> list[dict]:
         """获取推荐文章列表。"""
         try:
