@@ -10,6 +10,7 @@ import time
 from urllib.parse import unquote
 
 import httpx
+from httpx import HTTPStatusError, TimeoutException, ConnectError, TransportError
 from loguru import logger
 
 from smzdm_bot.config import UserConfig
@@ -21,6 +22,8 @@ SK_KEY = "geZm53XAspb02exN"
 DEFAULT_VERSION = "11.1.63"
 DEFAULT_VERSION_CODE = "11163"
 TIMEOUT = 30.0
+MAX_RETRIES = 3
+RETRY_DELAY = 2.0
 
 
 def parse_cookies(cookie_str: str) -> dict[str, str]:
@@ -86,7 +89,14 @@ class SmzdmClient:
             raise APIError("Cookie 缺少 sess 字段")
 
         self.user_id = self._cookies.get("smzdm_id", "unknown")
-        self._http = httpx.Client(timeout=TIMEOUT)
+        
+        # 配置 httpx 连接池
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        self._http = httpx.Client(
+            timeout=TIMEOUT,
+            limits=limits,
+            follow_redirects=True,
+        )
 
         self._version = self._cookies.get("device_smzdm_version", DEFAULT_VERSION)
         self._platform = self._cookies.get("device_smzdm", "android")
@@ -101,7 +111,10 @@ class SmzdmClient:
 
     def close(self) -> None:
         """关闭 HTTP 客户端。"""
-        self._http.close()
+        try:
+            self._http.close()
+        except Exception:
+            pass
 
     def __enter__(self) -> "SmzdmClient":
         return self
@@ -154,10 +167,30 @@ class SmzdmClient:
         data["sign"] = sign_data(data)
         return data
 
+    def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """带重试机制的请求。"""
+        last_exception = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return self._http.request(method, url, **kwargs)
+            except (TimeoutException, ConnectError, TransportError) as e:
+                last_exception = e
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY * (attempt + 1)
+                    logger.warning(f"请求失败 ({attempt + 1}/{MAX_RETRIES})，{delay:.1f}秒后重试: {e}")
+                    time.sleep(delay)
+                continue
+        
+        raise last_exception
+
     def post(self, endpoint: str, extra: dict | None = None, base: str | None = None) -> dict:
-        """发送签名 POST 请求。"""
+        """发送签名 POST 请求（带重试）。"""
         url = (base or self.API_BASE) + endpoint
-        resp = self._http.post(url, data=self._build_form(extra), headers=self._app_headers())
+        resp = self._request_with_retry(
+            "POST", url,
+            data=self._build_form(extra),
+            headers=self._app_headers()
+        )
         resp.raise_for_status()
 
         data = resp.json()
@@ -167,14 +200,22 @@ class SmzdmClient:
         return data
 
     def post_web(self, url: str, data: dict, referer: str | None = None) -> dict:
-        """发送 Web POST 请求。"""
-        resp = self._http.post(url, data=data, headers=self._web_headers(referer))
+        """发送 Web POST 请求（带重试）。"""
+        resp = self._request_with_retry(
+            "POST", url,
+            data=data,
+            headers=self._web_headers(referer)
+        )
         resp.raise_for_status()
         return resp.json()
 
     def get_web(self, url: str, params: dict | None = None) -> httpx.Response:
-        """发送 Web GET 请求。"""
-        return self._http.get(url, params=params, headers=self._web_headers())
+        """发送 Web GET 请求（带重试）。"""
+        return self._request_with_retry(
+            "GET", url,
+            params=params,
+            headers=self._web_headers()
+        )
 
     def get_jsonp(self, url: str, params: dict | None = None) -> dict | None:
         """发送请求并解析 JSONP。"""

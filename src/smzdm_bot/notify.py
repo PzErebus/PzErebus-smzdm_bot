@@ -1,5 +1,6 @@
 """通知模块 - 支持多种推送方式。"""
 
+import time
 from typing import Callable
 
 import httpx
@@ -7,30 +8,41 @@ from loguru import logger
 
 from smzdm_bot.config import NotifyConfig
 
+
 TIMEOUT = 30.0
+MAX_RETRIES = 2
+RETRY_DELAY = 1.0
 
 
-def _send_request(
+def _send_request_with_retry(
     name: str,
     url: str,
     payload: dict | None = None,
     data: dict | None = None,
     check_success: Callable[[dict], bool] | None = None,
 ) -> bool:
-    """通用请求发送函数。"""
-    try:
-        if payload:
-            resp = httpx.post(url, json=payload, timeout=TIMEOUT)
-        else:
-            resp = httpx.post(url, data=data or {}, timeout=TIMEOUT)
+    """通用请求发送函数（带重试）。"""
+    last_exception = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            if payload:
+                resp = httpx.post(url, json=payload, timeout=TIMEOUT)
+            else:
+                resp = httpx.post(url, data=data or {}, timeout=TIMEOUT)
 
-        result = resp.json()
-        if check_success and check_success(result):
-            logger.success(f"✅ {name}: 发送成功")
-            return True
-        logger.warning(f"{name} 发送失败: {resp.text[:100]}")
-    except Exception as e:
-        logger.warning(f"{name} 发送异常: {e}")
+            result = resp.json()
+            if check_success and check_success(result):
+                logger.success(f"✅ {name}: 发送成功")
+                return True
+            logger.warning(f"{name} 发送失败: {resp.text[:100]}")
+        except Exception as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                logger.warning(f"{name} 发送异常 ({attempt + 1}/{MAX_RETRIES})，{RETRY_DELAY:.1f}秒后重试: {e}")
+                time.sleep(RETRY_DELAY)
+                continue
+            logger.warning(f"{name} 发送异常: {e}")
+        return False
     return False
 
 
@@ -38,7 +50,7 @@ def send_pushplus(token: str, title: str, content: str) -> bool:
     """PushPlus 推送。"""
     if not token:
         return False
-    return _send_request(
+    return _send_request_with_retry(
         "PushPlus",
         "https://www.pushplus.plus/send",
         payload={"token": token, "title": title, "content": content, "template": "html"},
@@ -50,7 +62,7 @@ def send_serverchan(key: str, title: str, content: str) -> bool:
     """Server酱 推送。"""
     if not key:
         return False
-    return _send_request(
+    return _send_request_with_retry(
         "ServerChan",
         f"https://sctapi.ftqq.com/{key}.send",
         data={"title": title, "desp": content},
@@ -62,7 +74,7 @@ def send_wecom(webhook: str, title: str, content: str) -> bool:
     """企业微信 Bot 推送。"""
     if not webhook:
         return False
-    return _send_request(
+    return _send_request_with_retry(
         "WeCom",
         webhook,
         payload={"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
@@ -77,7 +89,7 @@ def send_telegram(
     if not token or not chat_id:
         return False
     base = api_base.rstrip("/") if api_base else "https://api.telegram.org"
-    return _send_request(
+    return _send_request_with_retry(
         "Telegram",
         f"{base}/bot{token}/sendMessage",
         payload={
