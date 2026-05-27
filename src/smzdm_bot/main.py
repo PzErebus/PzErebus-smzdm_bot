@@ -1,11 +1,14 @@
 """Main entry point for SMZDM Bot."""
 
+import time
+
 from loguru import logger
 
 from smzdm_bot.client import SmzdmClient
 from smzdm_bot.config import Settings, UserConfig, get_settings
 from smzdm_bot.models import TaskResult
 from smzdm_bot.notify import send_notification
+from smzdm_bot.report import print_report
 from smzdm_bot.tasks import TaskRunner
 
 
@@ -51,7 +54,13 @@ def run_all(settings: Settings | None = None) -> list[TaskResult]:
 
 def main() -> int:
     """Entry point for青龙面板."""
-    results = run_all()
+    start_time = time.time()
+    settings = get_settings()
+    
+    results = run_all(settings)
+
+    # 打印美化报告
+    print_report(results, settings, start_time)
 
     if not results:
         logger.warning("No users configured")
