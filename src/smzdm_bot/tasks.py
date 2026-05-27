@@ -164,25 +164,40 @@ class TaskRunner:
     def get_points_balance(self) -> PointsBalance:
         """获取积分余额。"""
         try:
-            try:
-                data = self.client.post("/user/info")
-                data = data.get("data", {})
-            except Exception:
+            data = {}
+            
+            apis_to_try = [
+                ("/user/points", "data"),
+                ("/points", "data"),
+                ("/user/home", "data"),
+                ("/vip", "data.user_info"),
+            ]
+            
+            for api, path in apis_to_try:
                 try:
-                    data = self.client.post("/vip")
-                    data = data.get("data", {}).get("user_info", {})
+                    result = self.client.post(api)
+                    if result and result.get("code") == 0:
+                        parts = path.split(".")
+                        current = result
+                        for part in parts:
+                            current = current.get(part, {})
+                        if current and (current.get("gold") or current.get("points") or current.get("coins")):
+                            data = current
+                            logger.debug(f"从 {api} 获取余额成功")
+                            break
                 except Exception:
-                    data = {}
+                    continue
             
             result = PointsBalance(
-                gold=data.get("gold", 0),
-                points=data.get("points", 0),
-                coins=data.get("coins", 0),
+                gold=data.get("gold", 0) or data.get("egold", 0) or data.get("smzdm_gold", 0) or 0,
+                points=data.get("points", 0) or data.get("epoint", 0) or data.get("smzdm_point", 0) or 0,
+                coins=data.get("coins", 0) or data.get("ecoin", 0) or data.get("smzdm_coin", 0) or 0,
             )
+            
             logger.info(f"💰 金币: {result.gold} | 💎 积分: {result.points} | 🪙 碎银: {result.coins}")
             return result
         except Exception as e:
-            logger.warning(f"获取积分余额失败: {e}")
+            logger.debug(f"获取积分余额失败: {e}")
             return PointsBalance()
 
     @tasks.task(name="文章点赞", priority=TaskPriority.LOW, delay=(2, 4))
