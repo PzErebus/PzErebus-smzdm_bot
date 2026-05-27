@@ -310,6 +310,121 @@ class TaskRunner:
             logger.warning(f"视频任务执行失败: {e}")
             return 0
 
+    @tasks.task(name="评论任务", priority=TaskPriority.LOW, delay=(3, 6))
+    def comment_articles(self) -> int:
+        """评论文章满3篇瓜分碎银。"""
+        try:
+            articles = self._get_recommend_articles(min_count=3)
+            if not articles:
+                logger.info("无文章可评论")
+                return 0
+
+            commented = 0
+            comments_list = [
+                "不错，收藏了", "好东西，值得入手", "感谢分享",
+                "价格不错，关注了", "性价比很高", "值得推荐",
+                "这个价格很香", "感谢博主分享", "已入手，好用",
+            ]
+
+            for i, article in enumerate(articles[:3]):
+                article_id = article.get("article_id", "")
+                title = article.get("article_title", "")[:20]
+
+                if not article_id:
+                    continue
+
+                comment = random.choice(comments_list)
+                logger.info(f"💬 评论文章: {title}")
+
+                if self._post_comment(article_id, comment):
+                    logger.info(f"✅ 评论成功: {comment}")
+                    commented += 1
+                else:
+                    logger.debug(f"评论失败: {title}")
+
+                if i < 2:
+                    time.sleep(random.randint(5, 10))
+
+            if commented >= 3:
+                time.sleep(random.randint(10, 20))
+                if self._claim_comment_reward():
+                    logger.info(f"✅ 领取评论奖励成功")
+                else:
+                    logger.debug("领取评论奖励失败")
+
+            logger.info(f"评论任务完成: {commented}")
+            return commented
+        except Exception as e:
+            logger.warning(f"评论任务执行失败: {e}")
+            return 0
+
+    @tasks.task(name="分享任务", priority=TaskPriority.LOW, delay=(2, 4))
+    def share_articles(self) -> int:
+        """分享文章获取碎银。"""
+        try:
+            articles = self._get_recommend_articles(min_count=3)
+            if not articles:
+                logger.info("无文章可分享")
+                return 0
+
+            shared = 0
+            for article in articles[:3]:
+                article_id = article.get("article_id", "")
+                title = article.get("article_title", "")[:20]
+
+                if not article_id:
+                    continue
+
+                logger.info(f"📤 分享文章: {title}")
+
+                if self._share_article(article_id):
+                    logger.info(f"✅ 分享成功: {title}")
+                    shared += 1
+                else:
+                    logger.debug(f"分享失败: {title}")
+
+                time.sleep(random.randint(3, 6))
+
+            logger.info(f"分享任务完成: {shared}")
+            return shared
+        except Exception as e:
+            logger.warning(f"分享任务执行失败: {e}")
+            return 0
+
+    @tasks.task(name="商品浏览", priority=TaskPriority.LOW, delay=(3, 6))
+    def browse_products(self) -> int:
+        """浏览商品获取碎银。"""
+        try:
+            products = self._get_product_list()
+            if not products:
+                logger.info("无商品可浏览")
+                return 0
+
+            browsed = 0
+            for product in products[:3]:
+                product_id = product.get("item_id", "") or product.get("article_id", "")
+                title = product.get("title", "")[:20]
+
+                if not product_id:
+                    continue
+
+                logger.info(f"🛒 浏览商品: {title}")
+                time.sleep(random.randint(10, 20))
+
+                if self._browse_product(product_id):
+                    logger.info(f"✅ 浏览完成: {title}")
+                    browsed += 1
+                else:
+                    logger.debug(f"浏览上报失败: {title}")
+
+                time.sleep(random.randint(3, 6))
+
+            logger.info(f"商品浏览完成: {browsed}")
+            return browsed
+        except Exception as e:
+            logger.warning(f"商品浏览任务执行失败: {e}")
+            return 0
+
     def _get_video_list(self) -> list[dict]:
         """获取视频列表。"""
         try:
@@ -330,6 +445,35 @@ class TaskRunner:
         try:
             data = self.client.post("/home/index")
             return data.get("data", {}).get("video_list", [])
+        except Exception:
+            return []
+
+    def _get_product_list(self) -> list[dict]:
+        """获取商品列表。"""
+        try:
+            data = self.client.post("/product/list", {"page": 1, "limit": 10})
+            return data.get("data", {}).get("rows", [])
+        except Exception:
+            pass
+        
+        try:
+            data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
+            articles = data.get("data", {}).get("rows", [])
+            return [a for a in articles if a.get("article_type") in ("product", "haitao")]
+        except Exception:
+            pass
+        
+        try:
+            data = self.client.post("/home/index")
+            return data.get("data", {}).get("haitao_list", [])
+        except Exception:
+            return []
+
+    def _get_recommend_articles(self, min_count: int = 1) -> list[dict]:
+        """获取推荐文章列表。"""
+        try:
+            data = self.client.post("/article/recommend_list", {"page": 1, "limit": max(min_count, 20)})
+            return data.get("data", {}).get("rows", [])
         except Exception:
             return []
 
@@ -363,13 +507,49 @@ class TaskRunner:
             except Exception:
                 return False
 
-    def _get_recommend_articles(self) -> list[dict]:
-        """获取推荐文章列表。"""
+    def _post_comment(self, article_id: str, content: str) -> bool:
+        """发表评论。"""
         try:
-            data = self.client.post("/article/recommend_list", {"page": 1, "limit": 20})
-            return data.get("data", {}).get("rows", [])
+            self.client.post("/comment/add", {"article_id": article_id, "content": content})
+            return True
         except Exception:
-            return []
+            return False
+
+    def _claim_comment_reward(self) -> bool:
+        """领取评论奖励。"""
+        try:
+            self.client.post("/comment/claim_reward")
+            return True
+        except Exception:
+            try:
+                self.client.post("/task/comment_reward")
+                return True
+            except Exception:
+                return False
+
+    def _share_article(self, article_id: str) -> bool:
+        """分享文章。"""
+        try:
+            self.client.post("/article/share", {"article_id": article_id})
+            return True
+        except Exception:
+            try:
+                self.client.post("/task/share", {"article_id": article_id})
+                return True
+            except Exception:
+                return False
+
+    def _browse_product(self, product_id: str) -> bool:
+        """浏览商品上报。"""
+        try:
+            self.client.post("/product/browse", {"item_id": product_id})
+            return True
+        except Exception:
+            try:
+                self.client.post("/task/view_product", {"item_id": product_id})
+                return True
+            except Exception:
+                return False
 
     def _execute_points_task(self, task: dict) -> bool:
         """执行积分任务。"""
