@@ -124,41 +124,130 @@ class TaskRunner:
 
         return count
 
+    # 兼容常见的任务分组字段名
+    GROUP_KEYS = ("task_list_v2", "task_list", "tasks", "task_list_v1")
+
     @tasks.task(name="每日任务", priority=TaskPriority.LOW, delay=(2, 5))
     def run_daily_tasks(self) -> int:
-        """执行每日任务。"""
+        """执行每日任务。
+
+        健壮版：遍历所有活动行（不再只看 rows[0]），兼容 list / dict 多种
+        嵌套结构；解析不到或执行失败都会打 warning，避免"静默空转"。
+        """
         try:
             data = self.client.post("/task/list_v2")
-            rows = data.get("data", {}).get("rows", [])
-            if not rows:
-                logger.info("无任务活动")
-                return 0
-
-            first_row = rows[0]
-            if isinstance(first_row, list):
-                return 0
-
-            cell_data = first_row.get("cell_data", {})
-            activity = cell_data.get("activity_task", {})
-            accumulate_list = activity.get("accumulate_list", {})
-
-            if isinstance(accumulate_list, list):
-                task_groups = accumulate_list
-            else:
-                task_groups = accumulate_list.get("task_list_v2", [])
-
-            completed = 0
-            for group in task_groups:
-                tasks_list = group if isinstance(group, list) else group.get("task_list", [])
-                for task in tasks_list:
-                    completed += self._process_task(task)
-
-            logger.info(f"完成任务: {completed}")
-            return completed
-
         except Exception as e:
-            logger.warning(f"每日任务失败: {e}")
+            logger.warning(f"每日任务: 接口请求失败 -> {e}")
             return 0
+
+        payload = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(payload, dict):
+            logger.warning(f"每日任务: 接口返回格式异常 -> {str(data)[:200]}")
+            return 0
+
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or not rows:
+            logger.warning("每日任务: 接口未返回任何活动（可能活动已下线或接口变更）")
+            return 0
+
+        task_groups = self._extract_task_groups(rows)
+        if not task_groups:
+            logger.warning(
+                f"每日任务: 在 {len(rows)} 个活动中未解析到任务分组，接口结构可能已变更"
+            )
+            return 0
+
+        completed = failed = 0
+        for group in task_groups:
+            for task in self._iter_tasks(group):
+                try:
+                    completed += self._process_task(task)
+                except Exception as e:
+                    failed += 1
+                    logger.warning(
+                        f"每日任务: [{task.get('task_name', '?')}] 处理异常 -> {e}"
+                    )
+
+        logger.info(f"完成任务: {completed}（异常 {failed}）")
+        if completed == 0:
+            logger.warning("每日任务: 本轮无任务完成（多为活动未开始或已全部领完）")
+        return completed
+
+    def _iter_tasks(self, group) -> list:
+        """从任务分组中取出任务字典列表。
+
+        分组可能是：任务数组(list of dict) / {"task_list": [...]} /
+        本身就是任务对象({"task_id": ...})。
+        """
+        if isinstance(group, list):
+            return [t for t in group if isinstance(t, dict)]
+        if isinstance(group, dict):
+            for key in self.GROUP_KEYS:
+                value = group.get(key)
+                if isinstance(value, list):
+                    return [t for t in value if isinstance(t, dict)]
+            if "task_id" in group:
+                return [group]
+        return []
+
+    def _extract_task_groups(self, rows: list) -> list:
+        """从 /task/list_v2 返回值中抽取所有任务分组（兼容多种嵌套结构）。"""
+        groups: list = []
+
+        def _extend(raw):
+            if isinstance(raw, list):
+                groups.extend([g for g in raw if isinstance(g, (list, dict))])
+
+        for row in rows:
+            # 行本身就是 list 结构（[cell, cell, ...]）
+            if isinstance(row, list):
+                _extend(row)
+                continue
+            if not isinstance(row, dict):
+                continue
+
+            cell_data = row.get("cell_data")
+            cell_data = cell_data if isinstance(cell_data, dict) else row
+
+            # 收集所有候选容器：cell_data 本身 + 其下所有子容器。
+            # 既兼容已知的 activity_task，也能在接口改名时兜底命中。
+            seen_ids = set()
+            containers = []
+            for cand in [cell_data, *[v for v in cell_data.values() if isinstance(v, dict)]]:
+                if id(cand) not in seen_ids:
+                    seen_ids.add(id(cand))
+                    containers.append(cand)
+
+            for container in containers:
+                accumulate_list = container.get("accumulate_list")
+                if isinstance(accumulate_list, list):
+                    _extend(accumulate_list)
+                elif isinstance(accumulate_list, dict):
+                    matched = False
+                    for key in self.GROUP_KEYS:
+                        value = accumulate_list.get(key)
+                        if isinstance(value, list):
+                            _extend(value)
+                            matched = True
+                            break
+                    # 兜底：字段名未知时，扫描其下所有值找任务数组
+                    if not matched:
+                        for value in accumulate_list.values():
+                            _extend(value)
+                # 兼容容器下直接挂任务列表的情况
+                for key in self.GROUP_KEYS:
+                    value = container.get(key)
+                    if isinstance(value, list):
+                        _extend(value)
+
+        # 去重：同一分组对象可能被多条路径引用到
+        unique: list = []
+        seen = set()
+        for g in groups:
+            if id(g) not in seen:
+                seen.add(id(g))
+                unique.append(g)
+        return unique
 
     @tasks.task(name="积分余额", priority=TaskPriority.NORMAL, delay=(1, 3))
     def get_points_balance(self) -> PointsBalance:
@@ -188,6 +277,8 @@ class TaskRunner:
                 except Exception:
                     continue
             
+            if not isinstance(data, dict):
+                data = {}
             result = PointsBalance(
                 gold=data.get("gold", 0) or data.get("egold", 0) or data.get("smzdm_gold", 0) or 0,
                 points=data.get("points", 0) or data.get("epoint", 0) or data.get("smzdm_point", 0) or 0,
@@ -395,7 +486,8 @@ class TaskRunner:
                 {"article_id": article_id, "channel_id": channel_id, "task_id": task_id},
             )
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"浏览上报失败: 文章 {article_id} -> {e}")
             return False
 
     def _do_follow_task(self, task: dict) -> bool:
@@ -458,7 +550,8 @@ class TaskRunner:
             self.client.post("/task/activity_task_receive", {"task_id": task_id})
             logger.success(f"奖励: {name}")
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"领取奖励失败: {name}({task_id}) -> {e}")
             return False
 
     def run_all(self) -> TaskResult:

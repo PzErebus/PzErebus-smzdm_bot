@@ -121,8 +121,11 @@ class TaskRegistry:
                 if info.optional:
                     logger.warning(f"{info.name} 失败: {error_msg}")
                 else:
+                    # 必选任务（签到）失败时不再 break：
+                    # 后续查询类任务（如「积分余额」）仍有意义，
+                    # 保持执行可以在签到异常时依然给出余额/碎银与每日任务结果，
+                    # 失败状态统一在 run_all 的汇总中体现。
                     logger.error(f"{info.name} 失败: {error_msg}")
-                    break
 
         return results
 
