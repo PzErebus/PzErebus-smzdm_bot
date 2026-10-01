@@ -20,11 +20,44 @@
 
 import os
 import random
+import re
 import sys
 import time
 from pathlib import Path
 
 REPO_NAME = "PzErebus_PzErebus-smzdm_bot"
+
+# 运行所需第三方依赖（对应 requirements.txt）
+REQUIRED_DEPS = ["httpx", "loguru", "pycryptodome", "pydantic", "pydantic-settings"]
+# 部分 pip 包名与 import 名不同（如 pycryptodome -> Crypto）
+IMPORT_TO_PIP = {"Crypto": "pycryptodome"}
+
+
+def _extract_module_name(err: ImportError):
+    """从 `No module named 'x'` 中取出模块名。"""
+    text = str(err)
+    match = re.search(r"no module named ['\"]([^'\"]+)['\"]", text, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def report_missing_dependency(err: ImportError) -> bool:
+    """把缺依赖的 ImportError 转成可执行的安装提示。命中返回 True。"""
+    module = _extract_module_name(err)
+    if not module:
+        return False
+    pip_name = IMPORT_TO_PIP.get(module, module)
+    if pip_name not in REQUIRED_DEPS and module not in REQUIRED_DEPS:
+        return False
+
+    print(f"[ERROR] 缺少依赖: {module}（pip 包名: {pip_name}）")
+    print("[提示] 装一下即可，两种方式任选其一：")
+    print("  1) 青龙面板 → 依赖管理 → Python3 → 新建依赖，依次添加：")
+    for dep in REQUIRED_DEPS:
+        print(f"       {dep}")
+    print("  2) 或进入青龙容器执行：")
+    print(f"     pip3 install {' '.join(REQUIRED_DEPS)}")
+    print(f"[DEBUG] 原始错误: {err}")
+    return True
 
 
 def add_src_to_path():
@@ -103,8 +136,9 @@ def main():
         print("[INFO] 成功导入 smzdm_bot 模块")
         sys.exit(bot_main())
     except ImportError as e:
-        print(f"[ERROR] 导入模块失败: {e}")
-        print(f"[DEBUG] sys.path: {sys.path}")
+        if not report_missing_dependency(e):
+            print(f"[ERROR] 导入模块失败: {e}")
+            print(f"[DEBUG] sys.path: {sys.path}")
         sys.exit(1)
     except Exception as e:
         print(f"[ERROR] 执行失败: {e}")
