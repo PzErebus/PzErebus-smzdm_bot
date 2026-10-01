@@ -1,5 +1,6 @@
 """Main entry point for SMZDM Bot."""
 
+import random
 import time
 
 from loguru import logger
@@ -11,12 +12,40 @@ from smzdm_bot.notify import send_notification
 from smzdm_bot.report import print_report
 from smzdm_bot.tasks import TaskRunner
 
+# 多账号之间的随机间隔（秒）
+USER_GAP_MIN = 15
+USER_GAP_MAX = 45
 
-def run_user(user: UserConfig) -> TaskResult:
+# SMZDM_ENABLE_RISKY 的取值别名（默认不在表中 => 不开启任何高风险任务）
+RISKY_ALIASES = {
+    "all": {"comment", "follow"},
+    "全部": {"comment", "follow"},
+    "*": {"comment", "follow"},
+    "true": {"comment", "follow"},
+    "1": {"comment", "follow"},
+    "comment": {"comment"},
+    "评论": {"comment"},
+    "follow": {"follow"},
+    "关注": {"follow"},
+}
+
+
+def parse_risky_tasks(setting: str) -> set[str]:
+    """解析高风险任务白名单。
+
+    未配置或配置无法识别时返回空集合（高风险任务全部关闭）。
+    """
+    enabled: set[str] = set()
+    for item in (setting or "").replace("|", ",").split(","):
+        enabled |= RISKY_ALIASES.get(item.strip().lower(), set())
+    return enabled
+
+
+def run_user(user: UserConfig, risky: set[str] | None = None) -> TaskResult:
     """Execute all tasks for a single user."""
     try:
         with SmzdmClient(user) as client:
-            runner = TaskRunner(client)
+            runner = TaskRunner(client, risky=risky)
             return runner.run_all()
     except Exception as e:
         logger.error(f"User {user.name} failed: {e}")
@@ -29,7 +58,22 @@ def run_all(settings: Settings | None = None) -> list[TaskResult]:
     users = settings.get_users()
 
     logger.info(f"Running tasks for {len(users)} user(s)")
-    results = [run_user(user) for user in users]
+
+    risky = parse_risky_tasks(settings.enable_risky)
+    if risky:
+        logger.info(f"已开启高风险任务: {', '.join(sorted(risky))}")
+    else:
+        logger.info("高风险任务（自动评论/关注取关）默认关闭，"
+                    "需要时设 SMZDM_ENABLE_RISKY=comment 或 follow 开启")
+
+    results: list[TaskResult] = []
+    for index, user in enumerate(users):
+        # 账号之间留一段随机间隔，避免同一 IP 连续高频请求被风控命中
+        if index > 0:
+            gap = random.randint(USER_GAP_MIN, USER_GAP_MAX)
+            logger.info(f"等待 {gap} 秒后处理下一个账号（{index + 1}/{len(users)}）...")
+            time.sleep(gap)
+        results.append(run_user(user, risky=risky))
 
     notify = settings.get_notify_config()
     logger.info(f"通知配置 - PushPlus: {'已配置' if notify.push_plus_token else '未配置'}")

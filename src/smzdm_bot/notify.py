@@ -21,9 +21,14 @@ def _send_request_with_retry(
     data: dict | None = None,
     check_success: Callable[[dict], bool] | None = None,
 ) -> bool:
-    """通用请求发送函数（带重试）。"""
-    last_exception = None
-    for attempt in range(MAX_RETRIES):
+    """通用请求发送函数（带重试）。
+
+    重试覆盖两种情况：请求抛异常、以及 check_success 判定不通过。
+    只有耗尽 MAX_RETRIES 仍不成功才返回 False。
+    """
+    last_reason = ""
+
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
             if payload:
                 resp = httpx.post(url, json=payload, timeout=TIMEOUT)
@@ -32,17 +37,23 @@ def _send_request_with_retry(
 
             result = resp.json()
             if check_success and check_success(result):
-                logger.success(f"✅ {name}: 发送成功")
+                if attempt > 1:
+                    logger.success(f"✅ {name}: 发送成功（第 {attempt} 次尝试）")
+                else:
+                    logger.success(f"✅ {name}: 发送成功")
                 return True
-            logger.warning(f"{name} 发送失败: {resp.text[:100]}")
+            last_reason = f"响应不符合预期: {resp.text[:100]}"
         except Exception as e:
-            last_exception = e
-            if attempt < MAX_RETRIES - 1:
-                logger.warning(f"{name} 发送异常 ({attempt + 1}/{MAX_RETRIES})，{RETRY_DELAY:.1f}秒后重试: {e}")
-                time.sleep(RETRY_DELAY)
-                continue
-            logger.warning(f"{name} 发送异常: {e}")
-        return False
+            last_reason = f"请求异常: {e}"
+
+        if attempt < MAX_RETRIES:
+            logger.warning(
+                f"{name} 发送失败 ({attempt}/{MAX_RETRIES})，"
+                f"{RETRY_DELAY:.1f} 秒后重试: {last_reason}"
+            )
+            time.sleep(RETRY_DELAY)
+
+    logger.warning(f"{name} 发送最终失败（已重试 {MAX_RETRIES} 次）: {last_reason}")
     return False
 
 

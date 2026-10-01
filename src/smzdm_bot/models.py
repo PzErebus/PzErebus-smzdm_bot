@@ -108,6 +108,14 @@ class TaskResult(BaseModel):
     reward: RewardInfo | None = None
     lottery: LotteryResult | None = None
     points_balance: PointsBalance | None = None
+
+    # 任务型结果的汇总（此前 int / ArticleResult 类型的返回值在 run_all 中被丢弃，
+    # 导致推送里看不到每日任务、积分任务、文章操作到底做了什么）
+    daily_tasks: int = 0        # 每日任务完成数
+    points_tasks: int = 0       # 积分任务完成数
+    lucky_draws: int = 0        # 幸运屋免费抽奖次数
+    articles: list[str] = Field(default_factory=list)  # 文章点赞/收藏摘要
+
     error: str | None = None
 
     def to_message(self) -> str:
@@ -123,7 +131,25 @@ class TaskResult(BaseModel):
             lines.append(self.lottery.to_message())
         if self.points_balance:
             lines.append(self.points_balance.to_message())
+
+        summary = self.task_summary
+        if summary:
+            lines.append(f"🎯 {summary}")
+        lines.extend(self.articles)
+
         if self.error:
             lines.append(f"❌ {self.error}")
 
         return "\n".join(lines)
+
+    @property
+    def task_summary(self) -> str:
+        """把任务型结果汇总成一行可读性摘要（无成果时返回空串）。"""
+        parts = []
+        if self.daily_tasks:
+            parts.append(f"每日任务 {self.daily_tasks} 个")
+        if self.points_tasks:
+            parts.append(f"积分任务 {self.points_tasks} 个")
+        if self.lucky_draws:
+            parts.append(f"幸运屋 {self.lucky_draws} 次")
+        return " | ".join(parts)

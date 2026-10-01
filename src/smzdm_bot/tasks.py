@@ -25,9 +25,20 @@ class TaskRunner:
     VIEW_TASK_TYPES = ("faxian", "haojia", "article", "yuanchuang")
     FOLLOW_EVENT_TYPES = ("interactive.follow.user", "interactive.follow.tag")
 
-    def __init__(self, client: SmzdmClient) -> None:
+    # 高风险任务（可能触发风控/人工审核），默认一律关闭
+    RISKY_FOLLOW = "follow"
+    RISKY_COMMENT = "comment"
+
+    # 抽奖兜底活动 ID（正常会以接口返回的 active_id 为准）
+    DEFAULT_ACTIVE_ID = "A6X1veWE2O"
+    # 中奖结果可能的字段名
+    LOTTERY_PRIZE_KEYS = ("prize_name", "prize", "award_name", "prize_title", "win_prize")
+
+    def __init__(self, client: SmzdmClient, risky: set[str] | None = None) -> None:
         self.client = client
         self.user_id = client.user_id
+        # 允许执行的高风险任务集合，空集合=全部关闭
+        self.risky: set[str] = risky or set()
 
     @tasks.task(name="签到", priority=TaskPriority.HIGH, optional=False)
     def checkin(self) -> CheckinResult:
@@ -74,22 +85,45 @@ class TaskRunner:
 
     @tasks.task(name="抽奖转盘", priority=TaskPriority.LOW, delay=(2, 5))
     def draw_lottery(self) -> LotteryResult:
-        """抽奖转盘。"""
-        ts = int(time.time())
-        params = {"callback": f"jQuery_{ts}", "active_id": "A6X1veWE2O", "_": ts}
+        """抽奖转盘。
 
-        data = self.client.get_jsonp(
-            f"{self.client.WEB_BASE}/user/lottery/jsonp_get_current", params
+        active_id 以前是写死的，活动换期后就会一直抽错；这里改为以接口
+        返回的 active_id 为准（仅在接口没给时才用兜底值），并解析中奖结果。
+        """
+        ts = int(time.time())
+        current = self.client.get_jsonp(
+            f"{self.client.WEB_BASE}/user/lottery/jsonp_get_current",
+            {"callback": f"jQuery_{ts}", "_": ts},
         )
-        if not data or data.get("remain_free_lottery_count", 0) < 1:
+        if not current:
+            return LotteryResult(success=False, message="无法获取抽奖信息")
+
+        remain = current.get("remain_free_lottery_count", 0) or 0
+        if int(remain) < 1:
             return LotteryResult(success=False, message="没有抽奖机会")
 
-        time.sleep(random.randint(1, 3))
-        data = self.client.get_jsonp(f"{self.client.WEB_BASE}/user/lottery/jsonp_draw", params)
-        if data:
-            return LotteryResult(success=True, message=data.get("error_msg", "抽奖完成"))
+        active_id = (
+            current.get("active_id")
+            or current.get("activity_id")
+            or current.get("activeId")
+            or self.DEFAULT_ACTIVE_ID
+        )
 
-        return LotteryResult(success=False, message="抽奖失败")
+        time.sleep(random.randint(1, 3))
+        data = self.client.get_jsonp(
+            f"{self.client.WEB_BASE}/user/lottery/jsonp_draw",
+            {"callback": f"jQuery_{int(time.time())}", "active_id": active_id},
+        )
+        if not data:
+            return LotteryResult(success=False, message="抽奖失败（无响应）")
+
+        message = data.get("error_msg") or data.get("msg") or ""
+        if not message:
+            message = next(
+                (str(data[key]) for key in self.LOTTERY_PRIZE_KEYS if data.get(key)),
+                "抽奖完成",
+            )
+        return LotteryResult(success=True, message=str(message))
 
     @tasks.task(name="幸运屋抽奖", priority=TaskPriority.LOW, delay=(2, 5))
     def draw_crowd(self) -> int:
@@ -173,6 +207,10 @@ class TaskRunner:
             logger.warning("每日任务: 本轮无任务完成（多为活动未开始或已全部领完）")
         return completed
 
+    def _is_risky_allowed(self, kind: str) -> bool:
+        """判断某类高风险任务是否允许执行。"""
+        return kind in self.risky
+
     def _iter_tasks(self, group) -> list:
         """从任务分组中取出任务字典列表。
 
@@ -249,6 +287,26 @@ class TaskRunner:
                 unique.append(g)
         return unique
 
+    @staticmethod
+    def _is_api_success(payload) -> bool:
+        """判断接口返回是否成功。
+
+        兼容两种成功标志字段：部分余额接口用 `code`，另一些用 `error_code`，
+        两个都没有时视为成功（交由后续字段提取兜底）。
+        """
+        if not isinstance(payload, dict):
+            return False
+        for key in ("error_code", "code"):
+            value = payload.get(key)
+            if value is None:
+                continue
+            try:
+                if int(value) != 0:
+                    return False
+            except (TypeError, ValueError):
+                continue
+        return True
+
     @tasks.task(name="积分余额", priority=TaskPriority.NORMAL, delay=(1, 3))
     def get_points_balance(self) -> PointsBalance:
         """获取积分余额。"""
@@ -265,20 +323,28 @@ class TaskRunner:
             for api, path in apis_to_try:
                 try:
                     result = self.client.post(api)
-                    if result and result.get("code") == 0:
-                        parts = path.split(".")
-                        current = result
-                        for part in parts:
-                            current = current.get(part, {})
-                        if current and (current.get("gold") or current.get("points") or current.get("coins")):
-                            data = current
-                            logger.debug(f"从 {api} 获取余额成功")
-                            break
-                except Exception:
+                    # 余额接口的成功标志字段不统一：有的返回 code，有的返回 error_code。
+                    # 只认其中一种会导致余额永远取不到（碎银一直是 0）。
+                    if not self._is_api_success(result):
+                        continue
+                    parts = path.split(".")
+                    current = result
+                    for part in parts:
+                        current = current.get(part, {})
+                    if isinstance(current, dict) and (
+                        current.get("gold") or
+                        current.get("points") or
+                        current.get("coins") or
+                        current.get("egold") or
+                        current.get("ecoin")
+                    ):
+                        data = current
+                        logger.debug(f"从 {api} 获取余额成功")
+                        break
+                except Exception as e:
+                    logger.debug(f"从 {api} 获取余额失败: {e}")
                     continue
             
-            if not isinstance(data, dict):
-                data = {}
             result = PointsBalance(
                 gold=data.get("gold", 0) or data.get("egold", 0) or data.get("smzdm_gold", 0) or 0,
                 points=data.get("points", 0) or data.get("epoint", 0) or data.get("smzdm_point", 0) or 0,
@@ -404,6 +470,12 @@ class TaskRunner:
                     return True
             
             elif task_type == "comment":
+                # 自动发评论容易被风控/人工审核，默认关闭
+                if not self._is_risky_allowed(self.RISKY_COMMENT):
+                    logger.warning(
+                        "跳过高风险任务: 自动评论（如需开启请设 SMZDM_ENABLE_RISKY=comment）"
+                    )
+                    return False
                 if article_id:
                     comments = ["不错", "很好", "支持", "点赞", "收藏了"]
                     comment = random.choice(comments)
@@ -449,11 +521,19 @@ class TaskRunner:
                     time.sleep(random.randint(3, 8))
                     return 1 if self._claim_task_reward(task_id, name) else 0
             elif event_type in self.FOLLOW_EVENT_TYPES or task_type in ("guanzhu", "lanmu"):
+                if not self._is_risky_allowed(self.RISKY_FOLLOW):
+                    logger.warning(
+                        f"跳过高风险任务: {name}（关注类任务默认关闭，"
+                        f"如需开启请设 SMZDM_ENABLE_RISKY=follow）"
+                    )
+                    return 0
                 if self._do_follow_task(task):
                     time.sleep(random.randint(3, 8))
                     return 1 if self._claim_task_reward(task_id, name) else 0
             else:
-                logger.debug(f"跳过: {task_type}")
+                # 不认识的类型直接跳过，不再无谓等待（否则一轮下来会白等很久）
+                logger.debug(f"跳过未知任务类型: {task_type or status}")
+                return 0
 
             time.sleep(random.randint(3, 8))
 
@@ -563,17 +643,30 @@ class TaskRunner:
         result = TaskResult(user_id=self.user_id)
 
         for r in task_results:
-            if r.data:
-                if isinstance(r.data, CheckinResult):
-                    result.checkin = r.data
-                elif isinstance(r.data, VipInfo):
-                    result.vip_info = r.data
-                elif isinstance(r.data, RewardInfo):
-                    result.reward = r.data
-                elif isinstance(r.data, LotteryResult):
-                    result.lottery = r.data
-                elif isinstance(r.data, PointsBalance):
-                    result.points_balance = r.data
+            data = r.data
+            if data is None:
+                continue
+
+            if isinstance(data, CheckinResult):
+                result.checkin = data
+            elif isinstance(data, VipInfo):
+                result.vip_info = data
+            elif isinstance(data, RewardInfo):
+                result.reward = data
+            elif isinstance(data, LotteryResult):
+                result.lottery = data
+            elif isinstance(data, PointsBalance):
+                result.points_balance = data
+            elif isinstance(data, ArticleResult):
+                result.articles.append(data.to_message())
+            elif isinstance(data, int):
+                # 任务型返回值是纯数字，按任务名归属到对应汇总字段
+                if r.name == "每日任务":
+                    result.daily_tasks += data
+                elif r.name == "积分任务":
+                    result.points_tasks += data
+                elif r.name == "幸运屋抽奖":
+                    result.lucky_draws += data
 
         checkin_result = next((r for r in task_results if r.name == "签到"), None)
         result.success = checkin_result is not None and checkin_result.success

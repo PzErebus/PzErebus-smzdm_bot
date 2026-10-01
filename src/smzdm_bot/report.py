@@ -61,13 +61,23 @@ class ExecutionReporter:
             "╚════════════════════════════════════════════════════════════════╝",
         ])
 
-        # 收集成就
+        # 收集成就（只陈述真实发生的事，不再无条件打印"全部成功"）
+        achievements = []
+        all_ok = bool(results)
         for result in results:
             if result.checkin:
-                lines.append(f"    🎊 连续签到: {result.checkin.consecutive_days} 天 🔥")
+                achievements.append(f"    🎊 连续签到: {result.checkin.consecutive_days} 天 🔥")
             if result.vip_info:
-                lines.append(f"    👑 VIP 等级: {result.vip_info.level} 🏆")
-        lines.append(f"    ✅ 所有任务执行成功 🎉")
+                achievements.append(f"    👑 VIP 等级: {result.vip_info.level} 🏆")
+            if not result.success:
+                all_ok = False
+
+        lines.extend(achievements)
+        if all_ok:
+            lines.append("    ✅ 所有任务执行成功 🎉")
+        else:
+            failed = sum(1 for r in results if not r.success)
+            lines.append(f"    ⚠️ {failed}/{len(results)} 个账号存在失败（见上方错误详情）")
 
         lines.extend([
             "",
@@ -122,6 +132,13 @@ class ExecutionReporter:
         if result.lottery:
             lines.append(f"  🎰 抽奖: {result.lottery.message}")
 
+        # 任务型成果（每日任务 / 积分任务 / 幸运屋）
+        summary = result.task_summary
+        if summary:
+            lines.append(f"  🎯 任务: {summary}")
+        if result.articles:
+            lines.extend(f"  {item}" for item in result.articles)
+
         if result.error:
             lines.append(f"  ❌ 错误: {result.error}")
 
@@ -134,6 +151,8 @@ class ExecutionReporter:
         total = len(results)
         success = sum(1 for r in results if r.success)
         failed = total - success
+        # total 为 0 时不要直接除零（例如用户配置为空却走到此处）
+        rate = f"{(success / total * 100):.1f}%" if total else "N/A（无账号）"
 
         return [
             "📊 执行统计",
@@ -141,7 +160,7 @@ class ExecutionReporter:
             f"  总用户数: {total}",
             f"  成功数: {success} ✅",
             f"  失败数: {failed} ❌",
-            f"  成功率: {(success/total*100):.1f}%",
+            f"  成功率: {rate}",
             "",
         ]
 

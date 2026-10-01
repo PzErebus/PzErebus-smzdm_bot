@@ -13,6 +13,8 @@
   - SMZDM_TG_USER_ID: Telegram User ID (可选)
   - SMZDM_DELAY_MIN: 随机延迟最小秒数，默认0 (可选)
   - SMZDM_DELAY_MAX: 随机延迟最大秒数，默认3600 (可选)
+  - SMZDM_ENABLE_RISKY: 高风险任务白名单，默认关闭。
+      取值: comment(自动发评论) / follow(关注取关) / all(两者)，逗号分隔也可
 
 多账号配置 (JSON格式):
   SMZDM_USERS: '[{"cookie": "...", "sk": "...", "name": "账号1"}, {"cookie": "..."}]'

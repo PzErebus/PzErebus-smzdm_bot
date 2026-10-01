@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     tg_user_id: str = ""
     tg_api_base: str = ""
 
+    # 高风险任务白名单（自动评论 / 关注取关）。
+    # 默认空 = 全部关闭；可选值：comment / follow / all（逗号分隔或任一即可）
+    enable_risky: str = ""
+
     debug: bool = False
 
     model_config = SettingsConfigDict(

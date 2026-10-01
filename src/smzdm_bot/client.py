@@ -7,6 +7,7 @@ import random
 import re
 import string
 import time
+from http.cookies import SimpleCookie
 from urllib.parse import unquote
 
 import httpx
@@ -33,6 +34,13 @@ def parse_cookies(cookie_str: str) -> dict[str, str]:
     if not cookie_str.endswith(";"):
         cookie_str += ";"
     return {k.strip(): unquote(v.strip()) for k, v in re.findall(r"([^=;]+)=([^;]*);", cookie_str)}
+
+
+def _quote(value: str) -> str:
+    """必要时给 cookie 值补上双引号（原串里带引号的字段要保持形态）。"""
+    if any(ch in value for ch in ('"', " ", ";")):
+        return f'"{value}"'
+    return value
 
 
 def sign_data(data: dict) -> str:
@@ -109,6 +117,41 @@ class SmzdmClient:
             if self._sk:
                 logger.debug("SK 自动生成成功")
 
+    def _sync_cookies(self, resp: "httpx.Response") -> None:
+        """把服务端下发的新 Cookie 回写到自持 cookie 串。
+
+        签到/抽奖等接口会在响应里通过 Set-Cookie 下发续期信息，若不回写，
+        后续任务会一直沿用旧的 sess，长期表现为"某天突然掉登录"。
+        """
+        try:
+            raw_cookies = resp.headers.get_list("set-cookie")
+        except (AttributeError, TypeError):
+            return
+
+        updates: dict[str, str] = {}
+        for raw in raw_cookies:
+            try:
+                jar = SimpleCookie()
+                jar.load(raw)
+            except Exception:
+                continue
+            for key, morsel in jar.items():
+                value = morsel.value
+                if not value or value.lower() == "deleted":
+                    continue
+                updates[key] = value
+
+        if not updates:
+            return
+
+        try:
+            self._cookies.update(updates)
+            self._cookie = "; ".join(
+                f"{k}={_quote(v)}" for k, v in self._cookies.items()
+            )
+        except Exception as e:
+            logger.debug(f"Cookie 回写失败（忽略）: {e}")
+
     def close(self) -> None:
         """关闭 HTTP 客户端。"""
         try:
@@ -172,7 +215,9 @@ class SmzdmClient:
         last_exception = None
         for attempt in range(MAX_RETRIES):
             try:
-                return self._http.request(method, url, **kwargs)
+                resp = self._http.request(method, url, **kwargs)
+                self._sync_cookies(resp)
+                return resp
             except (TimeoutException, ConnectError, TransportError) as e:
                 last_exception = e
                 if attempt < MAX_RETRIES - 1:
