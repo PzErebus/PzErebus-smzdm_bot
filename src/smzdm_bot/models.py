@@ -1,6 +1,6 @@
 """数据模型定义。"""
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class CheckinResult(BaseModel):
@@ -12,12 +12,22 @@ class CheckinResult(BaseModel):
     experience: int = Field(alias="cexperience", default=0)
     level: int = Field(alias="rank", default=0)
     cards: int = Field(default=0)
+    # 碎银: 服务端字段名不固定，多别名兜底
+    coins: int = Field(
+        validation_alias=AliasChoices("ccoins", "coins", "ecoin", "coin", "ecoin_num"),
+        default=0,
+    )
+    # 服务端提示"今天已经签到过了"时置 True，避免把正常状态当成失败
+    already: bool = False
 
     model_config = {"populate_by_name": True}
 
     def to_message(self) -> str:
+        if self.already:
+            return "⭐ 今日已签到（无需重复签到）"
         return (
             f"⭐ 签到成功 第{self.consecutive_days}天\n"
+            f"🪙 碎银: +{self.coins}\n"
             f"🪙 金币: +{self.gold}\n"
             f"💎 积分: +{self.points}\n"
             f"📈 经验: +{self.experience}\n"

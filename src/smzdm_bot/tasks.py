@@ -7,6 +7,7 @@ import time
 from loguru import logger
 
 from smzdm_bot.client import SmzdmClient
+from smzdm_bot.exceptions import APIError
 from smzdm_bot.models import (
     ArticleResult,
     CheckinResult,
@@ -42,11 +43,38 @@ class TaskRunner:
 
     @tasks.task(name="签到", priority=TaskPriority.HIGH, optional=False)
     def checkin(self) -> CheckinResult:
-        """每日签到。"""
-        data = self.client.post("/checkin")
-        result = CheckinResult(**data.get("data", {}))
-        logger.info(f"连续签到 {result.consecutive_days} 天")
+        """每日签到。
+
+        两个坑:
+        1. 今天已签到时，服务端返回 error_code != 0，client.post 会抛 APIError，
+           旧实现直接把它当失败 -> 报告里天天"签到 ❌"，其实早就签过了。
+        2. 碎银数量只在 data 里，字段名可能是 ccoins/coins 等，模型多个别名兜底。
+        """
+        try:
+            data = self.client.post("/checkin")
+        except APIError as e:
+            if self._is_already_checkin(str(e)):
+                logger.info(f"今日已签到（服务端返回: {e}）")
+                return CheckinResult(already=True)
+            raise
+
+        payload = data.get("data") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        result = CheckinResult(**payload)
+        logger.info(
+            f"连续签到 {result.consecutive_days} 天 | "
+            f"碎银 +{result.coins} | 金币 +{result.gold} | 积分 +{result.points}"
+        )
+        if not payload:
+            logger.warning(f"签到接口 data 为空，原始响应: {data}")
         return result
+
+    @staticmethod
+    def _is_already_checkin(msg: str) -> bool:
+        """判断 API 报错是不是"今天已经签到过了"这类正常状态。"""
+        return any(k in msg for k in ("已经签到", "已签到", "重复签到", "重复领取", "今日已领"))
 
     @tasks.task(name="VIP信息", priority=TaskPriority.HIGH)
     def get_vip_info(self) -> VipInfo:
